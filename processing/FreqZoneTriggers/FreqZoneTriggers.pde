@@ -263,14 +263,34 @@ void drawSpectrum(FFT fft) {
   noFill();
   int w = width;
   int h = height/2;
+  // Keep the zero-line comfortably above the band bars drawn in drawBandBars().
+  int bandBaseY = height/2 + 8;
+  int baselineY = max(30, bandBaseY - 60);
+  float amplitude = h * 0.5f; // swing half the vertical span around the center line
+
+  int nBands = BAND_BOUNDS.length - 1;
+  int[] bandHiIdx = new int[nBands];
+  for (int b = 0; b < nBands; b++) {
+    bandHiIdx[b] = freqToIndex(BAND_BOUNDS[b+1], AUDIO_SR, fft.specSize());
+  }
   pushMatrix();
-  translate(0, h);
+  translate(0, baselineY);
   beginShape();
+  int currentBand = 0;
   for (int i = 0; i < fft.specSize(); i++) {
+    while (currentBand < nBands - 1 && i > bandHiIdx[currentBand]) {
+      currentBand++;
+    }
+
+    BandTrigger bt = bands[min(currentBand, bands.length - 1)];
+    float smoothValue = bt.smooth;
+    float gamma = sqrt(fft.getBand(i)); // keep gentle gamma to soften spikes
+    float dynamicAmplitude = amplitude * constrain(gamma, 0, 1);
+    float y = lerp(dynamicAmplitude, -dynamicAmplitude, smoothValue);
     float x = map(i, 0, fft.specSize()-1, 0, w);
-    float y = -sqrt(fft.getBand(i)) * 12; // gentle gamma
     vertex(x, y);
   }
+  
   endShape();
   popMatrix();
 }
