@@ -12,6 +12,7 @@
  *   , / .          : decrease / increase cooldown (ms) of selected band
  *   - / =          : selected band note down / up
  *   c / C          : selected band CC down / up
+ *   i              : isolate (solo) the selected band for OSC/MIDI output
  *   t / T          : transpose all notes -1 / +1
  *   S / O          : Save / Load mapping (to data/mapping.json)
  *   B              : send MIDI-learn "burst" (CC sweeps + note taps)
@@ -86,6 +87,9 @@ float   ENERGY_SMOOTH   = 0.25f;
 
 // --- Viz config
 boolean SHOW_SPECTRUM = true;
+
+// --- Output control
+boolean SOLO_SELECTED_BAND = false;      // when true, only the selected band drives OSC/MIDI
 
 // ========================================================
 
@@ -195,11 +199,14 @@ void draw() {
     float eN = constrain(map(sum, bt.threshold, bt.threshold*4f, 0, 1), 0, 1);
     bt.smooth = lerp(bt.smooth, eN, ENERGY_SMOOTH);
 
+    boolean outputsActive = !SOLO_SELECTED_BAND || b == selectedBand;
+
     // Stream MIDI CC (for visual apps)
     if (MIDI_ENABLED && MIDI_SEND_CCS && midi != null) {
       int ccIndex = min(b, MIDI_CCS.length - 1);
       int ccNum   = MIDI_CCS[ccIndex];
-      int ccVal   = (int)round(lerp(MIDI_CC_MIN, MIDI_CC_MAX, bt.smooth));
+      float smoothForOutput = outputsActive ? bt.smooth : 0;
+      int ccVal   = (int)round(lerp(MIDI_CC_MIN, MIDI_CC_MAX, smoothForOutput));
       midi.cc(ccNum, ccVal);
     }
 
@@ -209,7 +216,7 @@ void draw() {
       em.add(bt.idx);
       em.add(bt.fLo);
       em.add(bt.fHi);
-      em.add(bt.smooth); // 0..1
+      em.add(outputsActive ? bt.smooth : 0); // 0..1
       osc.send(em, oscDest);
     }
 
@@ -222,7 +229,7 @@ void draw() {
     }
 
     boolean cooled = (now - bt.lastTrigMs) >= bt.cooldownMs;
-    if (bt.armed && cooled && sum >= bt.threshold) {
+    if (bt.armed && cooled && sum >= bt.threshold && outputsActive) {
       // Fire!
       bt.lastTrigMs = now;
       bt.armed = false;
@@ -320,8 +327,9 @@ void drawOverlay() {
   text("Source: " + src + (USE_LIVE ? "" : "  " + play) +
        "   OSC: " + (OSC_ENABLED ? "ON" : "off") +
        "   MIDI: " + (MIDI_ENABLED ? "ON" : "off") +
+       "   Solo: " + (SOLO_SELECTED_BAND ? "SELECTED" : "all") +
        "   Band: " + (selectedBand+1) + "/" + bands.length +
-       "   (1/2 sel, [/] thr, ;/' hyst, ,/. cool, -/= note, c/C CC, S/O save/load, B burst, D list, L source, P play, SPACE osc, M midi)",
+       "   (1/2 sel, [/] thr, ;/' hyst, ,/. cool, -/= note, c/C CC, i solo, S/O save/load, B burst, d/D list, L source, P play, SPACE osc, M midi)",
        10, 10);
 }
 
@@ -477,6 +485,11 @@ void keyPressed() {
 
   if (key == 'c') { int idx = min(selectedBand, MIDI_CCS.length-1); MIDI_CCS[idx] = clamp127(MIDI_CCS[idx]-1); println("Band " + (selectedBand+1) + " CC → " + MIDI_CCS[idx]); }
   if (key == 'C') { int idx = min(selectedBand, MIDI_CCS.length-1); MIDI_CCS[idx] = clamp127(MIDI_CCS[idx]+1); println("Band " + (selectedBand+1) + " CC → " + MIDI_CCS[idx]); }
+
+  if (key == 'i' || key == 'I') {
+    SOLO_SELECTED_BAND = !SOLO_SELECTED_BAND;
+    println("Solo " + (SOLO_SELECTED_BAND ? "ON (band " + (selectedBand+1) + ")" : "off"));
+  }
 
   if (key == 't') { for (int i = 0; i < bands.length; i++) bands[i].midiNote = clamp127(bands[i].midiNote - 1); println("Transposed all notes -1"); }
   if (key == 'T') { for (int i = 0; i < bands.length; i++) bands[i].midiNote = clamp127(bands[i].midiNote + 1); println("Transposed all notes +1"); }
