@@ -15,7 +15,7 @@
  *   t / T          : transpose all notes -1 / +1
  *   S / O          : Save / Load mapping (to data/mapping.json)
  *   B              : send MIDI-learn "burst" (CC sweeps + note taps)
- *   D              : list available MIDI outputs in console
+ *   d / D          : list/select next available MIDI output in console
  *   L              : toggle Live vs File playback
  *   P              : play/pause file (when in file mode)
  *   SPACE          : toggle OSC sending
@@ -82,7 +82,7 @@ int     MIDI_CC_MIN     = 0;
 int     MIDI_CC_MAX     = 127;
 
 // Simple smoothing for CC/OSC energy (0..1; higher = smoother)
-float   ENERGY_SMOOTH   = 0.25;
+float   ENERGY_SMOOTH   = 0.25f;
 
 // --- Viz config
 boolean SHOW_SPECTRUM = true;
@@ -160,7 +160,8 @@ void setup() {
 
   // MIDI out
   midi = new MidiOut(MIDI_DEVICE_HINT, MIDI_CHANNEL, MIDI_STRICT);
-
+  MidiOut.listOutputs();
+  
   textFont(createFont("Menlo", 12));
   frameRate(60);
 }
@@ -180,8 +181,8 @@ void draw() {
   for (int b = 0; b < bands.length; b++) {
     BandTrigger bt = bands[b];
 
-    int iLo = freqToIndex(bt.fLo, fft.sampleRate(), fft.specSize());
-    int iHi = freqToIndex(bt.fHi, fft.sampleRate(), fft.specSize());
+    int iLo = fft.freqToIndex(bt.fLo);
+    int iHi = fft.freqToIndex(bt.fHi);
 
     float sum = 0;
     for (int i = iLo; i <= iHi; i++) {
@@ -315,7 +316,7 @@ void drawOverlay() {
   fill(255);
   textAlign(LEFT, TOP);
   String src = USE_LIVE ? "LIVE" : "FILE";
-  String play = (!USE_LIVE && player != null && player.isPlaying()) ? "▶" : "❚❚";
+  String play = (!USE_LIVE && player != null && player.isPlaying()) ? "PLAY" : "PAUSE";
   text("Source: " + src + (USE_LIVE ? "" : "  " + play) +
        "   OSC: " + (OSC_ENABLED ? "ON" : "off") +
        "   MIDI: " + (MIDI_ENABLED ? "ON" : "off") +
@@ -325,12 +326,6 @@ void drawOverlay() {
 }
 
 // ---------- Helpers ----------
-
-int freqToIndex(float freq, float sampleRate, int specSize) {
-  float nyquist = sampleRate / 2f;
-  int idx = round(constrain((freq / nyquist) * (specSize - 1), 0, specSize - 1));
-  return idx;
-}
 
 void sendOscTrigger(BandTrigger bt, float energy) {
   OscMessage m = new OscMessage("/bandTrigger");
@@ -369,103 +364,6 @@ void processNoteOffs() {
       midi.noteOff(p.note);
       noteOffQueue.remove(i);
     }
-  }
-}
-
-// ---- Java Sound MIDI Out (device-targeted; IAC-friendly)
-class MidiOut {
-  javax.sound.midi.Receiver recv;
-  javax.sound.midi.MidiDevice device;   // keep a handle so we can close it
-  int ch;
-  String lastDeviceName = "(none)";
-
-  MidiOut(String nameHint, int channel, boolean strict) {
-    ch = constrain(channel, 0, 15);
-    connect(nameHint, strict);
-  }
-
-  void connect(String nameHint, boolean strict) {
-    recv = null;
-    device = null;
-
-    javax.sound.midi.MidiDevice dev = findOutputDevice(nameHint);
-    if (dev != null) {
-      try {
-        dev.open();
-        recv = dev.getReceiver();
-        device = dev;
-        lastDeviceName = dev.getDeviceInfo().getName();
-        println("MIDI → " + lastDeviceName);
-      } catch (Exception e) {
-        println("Failed to open preferred MIDI device: " + e);
-      }
-    }
-
-    // If strict, do NOT fall back to system default (which can be the Java SoftSynth)
-    if (recv == null && !strict) {
-      try {
-        recv = javax.sound.midi.MidiSystem.getReceiver();
-        lastDeviceName = "System default receiver";
-        println("MIDI → " + lastDeviceName);
-      } catch (Exception e) {
-        println("No default MIDI receiver: " + e);
-      }
-    }
-
-    if (recv == null) {
-      println("MIDI disabled (no matching output device).");
-    }
-  }
-
-  javax.sound.midi.MidiDevice findOutputDevice(String nameHint) {
-    String hint = (nameHint == null ? "" : nameHint.trim().toLowerCase());
-    javax.sound.midi.MidiDevice.Info[] infos = javax.sound.midi.MidiSystem.getMidiDeviceInfo();
-
-    // Match by substring in name/description/vendor, only devices that accept Receivers
-    for (javax.sound.midi.MidiDevice.Info info : infos) {
-      try {
-        javax.sound.midi.MidiDevice dev = javax.sound.midi.MidiSystem.getMidiDevice(info);
-        int maxRecv = dev.getMaxReceivers();  // -1 = unlimited, 0 = cannot receive
-        if (maxRecv != 0) {
-          String hay = (info.getName() + " " + info.getDescription() + " " + info.getVendor()).toLowerCase();
-          if (hint.length() == 0 || hay.contains(hint)) return dev;
-        }
-      } catch (Exception ignore) {}
-    }
-    return null;
-  }
-
-  static void listOutputs() {
-    println("MIDI outputs (accept Receivers):");
-    javax.sound.midi.MidiDevice.Info[] infos = javax.sound.midi.MidiSystem.getMidiDeviceInfo();
-    for (javax.sound.midi.MidiDevice.Info info : infos) {
-      try {
-        javax.sound.midi.MidiDevice dev = javax.sound.midi.MidiSystem.getMidiDevice(info);
-        if (dev.getMaxReceivers() != 0) {
-          println("  • " + info.getName() + "  —  " + info.getDescription() + "  [" + info.getVendor() + "]");
-        }
-      } catch (Exception ignore) {}
-    }
-  }
-
-  void noteOn(int note, int vel) { send(javax.sound.midi.ShortMessage.NOTE_ON,  note & 0x7F, vel & 0x7F); }
-  void noteOff(int note)        { send(javax.sound.midi.ShortMessage.NOTE_OFF, note & 0x7F, 0);           }
-  void cc(int ccNum, int value) { send(javax.sound.midi.ShortMessage.CONTROL_CHANGE, ccNum & 0x7F, value & 0x7F); }
-
-  void send(int command, int data1, int data2) {
-    if (recv == null) return;
-    try {
-      javax.sound.midi.ShortMessage msg = new javax.sound.midi.ShortMessage();
-      msg.setMessage(command, ch, data1, data2);
-      recv.send(msg, -1);
-    } catch (Exception e) {
-      println("MIDI send error: " + e);
-    }
-  }
-
-  void close() {
-    try { if (recv != null) recv.close(); } catch (Exception ignore) {}
-    try { if (device != null && device.isOpen()) device.close(); } catch (Exception ignore) {}
   }
 }
 
@@ -588,8 +486,7 @@ void keyPressed() {
   }
 
   if (key == 'B') { burstLearn(); }
-  if (key == 'D') { MidiOut.listOutputs(); }
-
+  if (key == 'd' || key == 'D') { MidiOut.listOutputs(); }
   if (key == 's' || key == 'S') { saveMapping("mapping.json"); }
   if (key == 'o' || key == 'O') { loadMapping("mapping.json"); }
 
