@@ -40,7 +40,7 @@ FFT fft;
 
 // --- Source config
 boolean USE_LIVE = true;                 // default input (toggle 'L')
-String  AUDIO_FILE = "your_audio.mp3";   // put in data/ folder
+String  AUDIO_FILE = "ReadySet.mp3";   // put in data/ folder
 int     AUDIO_BUF  = 2048;
 float   AUDIO_SR   = 44100;
 
@@ -364,7 +364,7 @@ class PendingNoteOff {
 }
 
 void processNoteOffs() {
-  int now = millis();
+  long now = millis();
   for (int i = noteOffQueue.size()-1; i >= 0; i--) {
     PendingNoteOff p = noteOffQueue.get(i);
     if (now >= p.whenMs) {
