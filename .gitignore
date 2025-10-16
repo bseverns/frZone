@@ -1,0 +1,6 @@
+.DS_Store
+.idea/
+.vscode/
+*.zip
+processing/FreqZoneTriggers/data/*.wav
+processing/FreqZoneTriggers/data/*.mp3
