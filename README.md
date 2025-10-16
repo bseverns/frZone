@@ -16,7 +16,7 @@ A Processing (Java) sketch that slices the spectrum into tweakable bands and fir
 4. Enable **IAC Driver** (macOS: Audio MIDI Setup → MIDI Studio). The sketch auto‑targets ports matching `"IAC"`.
 
 **Keys**:  
-`1/2` band select · `[ / ]` threshold · `; / '` hysteresis · `, / .` cooldown · `- / =` note · `c/C` CC · `B` burst · `S/O` save/load · `t/T` transpose · `D` list MIDI outs · `L` live/file · `P` play · `SPACE` OSC toggle · `M` MIDI toggle
+`1/2` band select · `[ / ]` threshold · `; / '` hysteresis · `, / .` cooldown · `- / =` note · `c/C` CC · `i` solo selected band (OSC/MIDI only) · `B` burst · `S/O` save/load · `t/T` transpose · `d/D` list MIDI outs (quiet/loud, your call) · `L` live/file · `P` play · `SPACE` OSC toggle · `M` MIDI toggle
 
 ## Targeting a specific MIDI device
 At the top of the sketch:
