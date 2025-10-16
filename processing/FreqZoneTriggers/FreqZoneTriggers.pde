@@ -327,6 +327,12 @@ void drawOverlay() {
 
 // ---------- Helpers ----------
 
+int freqToIndex(float freq, float sampleRate, int specSize) {
+  float nyquist = sampleRate / 2f;
+  int idx = round(constrain((freq / nyquist) * (specSize - 1), 0, specSize - 1));
+  return idx;
+}
+
 void sendOscTrigger(BandTrigger bt, float energy) {
   OscMessage m = new OscMessage("/bandTrigger");
   m.add(bt.idx);
@@ -352,8 +358,9 @@ int clamp127(int v) { return max(0, min(127, v)); }
 // ---------- MIDI helpers ----------
 
 class PendingNoteOff {
-  int note, whenMs;
-  PendingNoteOff(int note, int whenMs) { this.note = note; this.whenMs = whenMs; }
+  int note;
+  long whenMs;
+  PendingNoteOff(int note, long whenMs) { this.note = note; this.whenMs = whenMs; }
 }
 
 void processNoteOffs() {
