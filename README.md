@@ -1,71 +1,50 @@
 # Freq‑Zone Peak Triggers (Live/File) + OSC + MIDI
 
-_A Processing (Java) sketch that slices the spectrum into student‑tweakable bands and fires OSC + MIDI when peaks occur. Built for teaching signal flow, thresholding, hysteresis, and performance routing._
+A Processing (Java) sketch that slices the spectrum into tweakable bands and fires **OSC**, **MIDI notes**, and **continuous MIDI CC** for visuals (Signal Culture apps, TD, etc.). Built for teaching **thresholds / hysteresis / cooldown** and practical routing.
 
-## What this repo gives you
-- **Processing sketch** with live/file switch, per‑band threshold/hysteresis/cooldown, OSC + MIDI out, and a lightweight visualizer.
-- **Rabbit‑holes**: curated links into Processing/Minim/oscP5, Java MIDI, OSC, and DAW/tool integrations.
-- **Examples**: Python OSC receiver, SuperCollider snippet, and platform‑specific MIDI loopback notes.
-- **Class scaffolding**: three assignment briefs to get from calibration → performance.
+## Features for visual apps
+- **IAC‑targeted MIDI out** (no SoftSynth fallback unless you set `MIDI_STRICT=false`)
+- **Continuous per‑band CC** (default CCs 20–24) + **note hits** (for gates/learn taps)
+- **OSC energy stream** `/bandEnergy` (idx, fLo, fHi, energyN 0..1)
+- **MIDI Learn Burst** (**B**): CC 0→127→0 + a short note tap per band
+- **Per‑band note/CC assignment** (keys), **save/load mapping** (`data/mapping.json`)
 
 ## Quick start
-1) **Install Processing (Java mode)** and run it once.  
-2) **Install libraries** via Processing’s Contribution Manager: search for **Minim** and **oscP5**.  
-3) `File → Open...` and choose `processing/FreqZoneTriggers/FreqZoneTriggers.pde`.  
-4) Optional: put an mp3 into `processing/FreqZoneTriggers/data/` named `your_audio.mp3` and press **P** to play when in File mode.  
-5) Hit **L** to toggle Live/File. Use **1/2** to select a band and **[, ], ;, ', ,, .** to tune it.  
-6) Toggle **SPACE** (OSC) and **M** (MIDI). See `docs/osc_addresses.md` and `docs/midi_map.md`.
+1. Install **Processing (Java mode)**. In Contribution Manager, add **Minim** and **oscP5**.
+2. Open `processing/FreqZoneTriggers/FreqZoneTriggers.pde` and press ▶.
+3. Optional: put `your_audio.mp3` in `processing/FreqZoneTriggers/data/`, press **P** in File mode.
+4. Enable **IAC Driver** (macOS: Audio MIDI Setup → MIDI Studio). The sketch auto‑targets ports matching `"IAC"`.
 
-> Tip: On macOS use the **IAC Driver** for a virtual MIDI loopback; on Windows use **loopMIDI**; on Linux use **aconnect** (ALSA). See `examples/midi/virtual_midi.md` for step‑by‑step.
+**Keys**:  
+`1/2` band select · `[ / ]` threshold · `; / '` hysteresis · `, / .` cooldown · `- / =` note · `c/C` CC · `B` burst · `S/O` save/load · `t/T` transpose · `D` list MIDI outs · `L` live/file · `P` play · `SPACE` OSC toggle · `M` MIDI toggle
 
-## Controls (cheatsheet)
-- **1 / 2**: select prev / next band  
-- **[ / ]**: decrease / increase **threshold**  
-- **; / '**: decrease / increase **hysteresis**  
-- **, / .**: decrease / increase **cooldown (ms)**  
-- **L**: live vs file input  
-- **P**: play/pause file (file mode)  
-- **SPACE**: OSC on/off  
-- **M**: MIDI on/off  
+## Targeting a specific MIDI device
+At the top of the sketch:
+```java
+String  MIDI_DEVICE_HINT = "IAC"; // substring of device name/description/vendor
+boolean MIDI_STRICT      = true;  // if not found, MIDI disabled (no SoftSynth)
+```
+Press **D** to print all outputs that accept Receivers and confirm the exact name.
 
 ## OSC + MIDI
-- **OSC Address**: `/bandTrigger`  
-  **Args**: `int bandIndex, float fLo, float fHi, float energy, float threshold, float hysteresis, int cooldownMs`  
-- **MIDI**: Note‑on mapped per band (see `docs/midi_map.md`). Velocity scales with energy; auto note‑off after `MIDI_NOTE_LEN_MS`.
-
-## Teaching ideas
-- **Calibrate**: Make students normalize band thresholds so that each layer is “fair” under pink noise vs. a drum loop.  
-- **Map**: Route low band → lights, mid bands → drums, highs → FX. Students justify their mapping in a short write‑up.  
-- **Perform**: Small groups build a 2‑minute structure where one group’s triggers drive another group’s visuals/sampler.
+- **OSC event**: `/bandTrigger` → `i f f f f f i` (bandIndex, fLo, fHi, energy, threshold, hysteresis, cooldownMs)
+- **OSC energy**: `/bandEnergy` → `i f f f` (bandIndex, fLo, fHi, energyN 0..1)
+- **MIDI**: Notes per band (editable), velocity scales with energy; CC per band streams `0..127`.
 
 ## Repo layout
 ```
-freq-zone-triggers/
-├─ processing/
-│  └─ FreqZoneTriggers/
-│     ├─ FreqZoneTriggers.pde
-│     └─ data/ (put audio here)
-├─ examples/
-│  ├─ osc/python_receiver.py
-│  └─ midi/virtual_midi.md
-├─ docs/
-│  ├─ quickstart.md
-│  ├─ concepts.md
-│  ├─ midi_map.md
-│  ├─ osc_addresses.md
-│  ├─ troubleshooting.md
-│  └─ links.md
-├─ assignments/
-│  ├─ 01_calibrate_bands.md
-│  ├─ 02_build_performer.md
-│  └─ 03_chain_reaction.md
-├─ LICENSE
-└─ .gitignore
+processing/
+  FreqZoneTriggers/
+    FreqZoneTriggers.pde
+    data/
+      (place audio + mapping.json here)
+docs/
+  quickstart.md • concepts.md • midi_map.md • osc_addresses.md • troubleshooting.md • links.md
+examples/
+  osc/python_receiver.py • midi/virtual_midi.md
+assignments/
+  01_calibrate_bands.md • 02_build_performer.md • 03_chain_reaction.md
 ```
 
-## Credits
-- Original sketch authored by **Ben**. Repo scaffolding by ChatGPT (“BS Sound Studio” context).
-
 ---
-
-If this helps, consider adding student forks / examples to a class gallery in your course LMS or a GitHub org.
+Made for teaching & performance. Contributions welcome.

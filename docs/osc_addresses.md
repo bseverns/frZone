@@ -1,20 +1,7 @@
 # OSC Addressing
 
-This sketch **sends** (does not listen) to a single address:
+- **/bandTrigger** (event pulse): `i f f f f f i`
+  - `idx, fLo, fHi, energy, threshold, hysteresis, cooldownMs`
 
-```
-/bandTrigger  i f f f f f i
-              | | | | | | |
-              | | | | | | └─ cooldownMs
-              | | | | | └─── hysteresis
-              | | | | └───── threshold
-              | | | └─────── energy (current summed band energy)
-              | | └───────── fHi (Hz)
-              | └─────────── fLo (Hz)
-              └───────────── bandIndex (0‑based)
-```
-
-Suggested receivers:
-- Python (`examples/osc/python_receiver.py`)
-- TouchDesigner (OSC In CHOP)
-- SuperCollider / Max / Pure Data
+- **/bandEnergy** (continuous): `i f f f`
+  - `idx, fLo, fHi, energyN` where `energyN` is 0..1 smoothed.
