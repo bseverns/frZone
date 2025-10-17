@@ -129,7 +129,7 @@ BandTrigger[] bands;
 int selectedBand = 0;
 
 void settings() {
-  size(960, 540);
+  size(1450, 500);
 }
 
 void setup() {
@@ -262,9 +262,9 @@ void drawSpectrum(FFT fft) {
   stroke(80);
   noFill();
   int w = width;
-  int h = height/3;
+  int h = height/4;
   // Keep the zero-line comfortably above the band bars drawn in drawBandBars().
-  int bandBaseY = height/2 + 8;
+  int bandBaseY = height/2 - 35;
   int baselineY = max(30, bandBaseY - 60);
   float amplitude = h * 0.5f; // swing half the vertical span around the center line
 
