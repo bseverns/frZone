@@ -262,7 +262,7 @@ void drawSpectrum(FFT fft) {
   stroke(80);
   noFill();
   int w = width;
-  int h = height/2;
+  int h = height/3;
   // Keep the zero-line comfortably above the band bars drawn in drawBandBars().
   int bandBaseY = height/2 + 8;
   int baselineY = max(30, bandBaseY - 60);
