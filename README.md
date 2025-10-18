@@ -32,19 +32,13 @@ Press **D** to print all outputs that accept Receivers and confirm the exact nam
 - **MIDI**: Notes per band (editable), velocity scales with energy; CC per band streams `0..127`.
 
 ## Repo layout
-```
-processing/
-  FreqZoneTriggers/
-    FreqZoneTriggers.pde
-    data/
-      (place audio + mapping.json here)
-docs/
-  quickstart.md • concepts.md • midi_map.md • osc_addresses.md • troubleshooting.md • links.md
-examples/
-  osc/python_receiver.py • midi/virtual_midi.md
-assignments/
-  01_calibrate_bands.md • 02_build_performer.md • 03_chain_reaction.md
-```
+| Folder | What's good reading | What you can do with it |
+| --- | --- | --- |
+| processing/ | FreqZoneTriggers/FreqZoneTriggers.pde | Main processing sketch - this controls both info routing and display |
+| FreqZoneTriggers/data | the whole folder | This is where the files we use for building non-live examples and repeatable, less-complex teaching | 
+| docs/ | Helpful markdown files | Maps to what I'm thinking/building - look for updates |
+| examples/ | Python &&markdown docs for using the firehose of data that comes out of this thing | Useful for wrapping one's head around the intent/implementation in a reusable way |
+| assignments/ | Markdown class exercises | Useful for teaching students about the world of networked flows and webs of systems together |
 
 ---
 Made for teaching & performance. Contributions welcome.
