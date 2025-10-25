@@ -41,7 +41,7 @@ FFT fft;
 
 // --- Source config
 boolean USE_LIVE = true;                 // default input (toggle 'L')
-String  AUDIO_FILE = "ReadySet.mp3";   // put in data/ folder
+String  AUDIO_FILE = "BS05.mp3";   // put in data/ folder
 int     AUDIO_BUF  = 2048;
 float   AUDIO_SR   = 44100;
 
