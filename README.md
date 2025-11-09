@@ -18,6 +18,12 @@ A Processing (Java) sketch that slices the spectrum into tweakable bands and fir
 **Keys**:  
 `1/2` band select · `[ / ]` threshold · `; / '` hysteresis · `, / .` cooldown · `- / =` note · `c/C` CC · `i` solo selected band (OSC/MIDI only) · `B` burst · `S/O` save/load · `t/T` transpose · `d/D` list MIDI outs (quiet/loud, your call) · `L` live/file · `P` play · `SPACE` OSC toggle · `M` MIDI toggle
 
+## Teaching notes (for lab leaders, professors, and adventurous students)
+- **Start with the comments in the sketch.** Everything documented there reflects the *current* defaults. If you fork this for a class, narrate those comments live so your cohort knows the code matches what they're hearing.
+- **Run a "threshold relay" exercise.** Pair students up; one drives the knobs while the other narrates what the sketch reports. Swap roles every five minutes. This keeps the vocabulary honest and matches the hysteresis logic in the code.
+- **Use MIDI burst as a signal routing check.** The `B` key fires a known-good CC sweep + note tap—perfect for verifying each learner patched their visual app correctly before you release them into the wild.
+- **Document your own band presets.** Have the class export `mapping.json` (press `S`). Stash those files in a shared drive so future cohorts can remix previous work. The defaults are intentionally "good enough" but not perfect, so everyone practices refinement.
+
 ## Targeting a specific MIDI device
 At the top of the sketch:
 ```java

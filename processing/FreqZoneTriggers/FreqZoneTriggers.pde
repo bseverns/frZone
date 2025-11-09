@@ -40,21 +40,32 @@ FFT fft;
 // ======================= CONFIG =========================
 
 // --- Source config
+// These values double as a micro-lesson plan: start students here so they can flip
+// between live input and a looping file without chasing phantom settings.
+// When tweaking for class demos, narrate what each line does *as written*—that
+// accuracy keeps the comments trustworthy.
 boolean USE_LIVE = true;                 // default input (toggle 'L')
 String  AUDIO_FILE = "BS05.mp3";   // put in data/ folder
 int     AUDIO_BUF  = 2048;
 float   AUDIO_SR   = 44100;
 
 // --- Frequency bands (Hz) — endpoints; N bands = bounds.length-1
+// Treat this like a lab knob: have students sketch their target spectrum, then
+// set these cut points and listen for what actually happens.
 float[] BAND_BOUNDS = { 0, 200, 800, 3000, 8000, 20000 };
 
 // --- Initial band configs (threshold, hysteresis, cooldown, MIDI note)
+// These arrays are intentionally imperfect so folks can hear the difference after
+// adjusting them. Keep them in sync with any handouts you share so students can
+// confirm they're starting from the same baseline.
 float[] INIT_THRESH     = { 9, 6, 4, 3, 2 };           // amplitude-ish (FFT sum)
 float[] INIT_HYSTERESIS = { 1.5, 1.2, 1.1, 1.1, 1.0 }; // multiplier above thresh to re-arm
 int[]   INIT_COOLDOWNMS = { 120, 120, 120, 140, 160 };
 int[]   MIDI_NOTES      = { 36, 38, 42, 46, 49 };      // C1, D1, F#1, A#1, C#2 for ex.
 
 // --- OSC config
+// Default loopback works out of the box in class. Encourage students to change
+// the host only after they can explain (to a rubber duck or to you) why.
 boolean OSC_ENABLED = true;
 String  OSC_HOST    = "127.0.0.1";
 int     OSC_PORT    = 9000;
@@ -83,6 +94,8 @@ int     MIDI_CC_MIN     = 0;
 int     MIDI_CC_MAX     = 127;
 
 // Simple smoothing for CC/OSC energy (0..1; higher = smoother)
+// This is the lever that makes the visuals chill out. Have learners set it to 0
+// and watch the strobe, then creep it upward until their rig behaves.
 float   ENERGY_SMOOTH   = 0.25f;
 
 // --- Viz config
@@ -100,6 +113,8 @@ MidiOut midi;  // device-targeted Java Sound MIDI out
 ArrayList<PendingNoteOff> noteOffQueue = new ArrayList<>();
 
 // per-band trigger state
+// Think of BandTrigger as the worksheet for each frequency slice—every concept
+// we demo (threshold, hysteresis, cooldown) lives here with the running history.
 class BandTrigger {
   int idx;
   float fLo, fHi;
@@ -196,6 +211,8 @@ void draw() {
     if (sum > maxBar) maxBar = sum;
 
     // Continuous energy: normalize around threshold and smooth
+    // This intentionally leans on the current threshold so students immediately
+    // hear/see why moving thresholds matters beyond "it triggers more".
     float eN = constrain(map(sum, bt.threshold, bt.threshold*4f, 0, 1), 0, 1);
     bt.smooth = lerp(bt.smooth, eN, ENERGY_SMOOTH);
 
@@ -221,6 +238,8 @@ void draw() {
     }
 
     // Trigger logic with hysteresis + cooldown
+    // The following eight lines are the heart of the lesson. Walk through them
+    // slowly—ask learners to narrate the state changes while you hold a note.
     long now = millis();
 
     // re-arm when energy falls sufficiently below threshold / hysteresis
@@ -235,6 +254,8 @@ void draw() {
       bt.armed = false;
 
       // OSC pulse event
+      // Send the full band descriptor every time so students can patch without
+      // flipping back to the code. No secret context.
       if (OSC_ENABLED) sendOscTrigger(bt, sum);
 
       // MIDI note event
@@ -284,7 +305,7 @@ void drawSpectrum(FFT fft) {
 
     BandTrigger bt = bands[min(currentBand, bands.length - 1)];
     float smoothValue = bt.smooth;
-    float gamma = sqrt(fft.getBand(i)); // keep gentle gamma to soften spikes
+    float gamma = sqrt(fft.getBand(i)); // gentle gamma softens spikes for classroom projectors
     float dynamicAmplitude = amplitude * constrain(gamma, 0, 1);
     float y = lerp(dynamicAmplitude, -dynamicAmplitude, smoothValue);
     float x = map(i, 0, fft.specSize()-1, 0, w);

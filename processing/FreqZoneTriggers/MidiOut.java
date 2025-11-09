@@ -1,5 +1,8 @@
 import javax.sound.midi.*;
 
+// Minimal wrapper around Java Sound's MIDI plumbing, annotated for classroom use.
+// The point: let students focus on trigger logic while still being honest about
+// how device discovery works under the hood.
 public class MidiOut {
   private Receiver recv;
   private MidiDevice device;
@@ -38,6 +41,8 @@ public class MidiOut {
     }
 
     if (recv == null) System.out.println("MIDI disabled (no matching output device).");
+    // Leave it noisy—students should *see* why notes aren't flying. Encourage them
+    // to run `MidiOut.listOutputs()` immediately after to practice debugging.
   }
 
   public static void listOutputs() {
