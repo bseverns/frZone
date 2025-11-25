@@ -38,13 +38,10 @@ Press **D** to print all outputs that accept Receivers and confirm the exact nam
 - **MIDI**: Notes per band (editable), velocity scales with energy; CC per band streams `0..127`.
 
 ## Repo layout
-| Folder | What's good reading | What you can do with it |
-| --- | --- | --- |
-| processing/ | FreqZoneTriggers/FreqZoneTriggers.pde | Main processing sketch - this controls both info routing and display |
-| FreqZoneTriggers/data | the whole folder | This is where the files we use for building non-live examples and repeatable, less-complex teaching | 
-| docs/ | Helpful markdown files | Maps to what I'm thinking/building - look for updates |
-| examples/ | Python &&markdown docs for using the firehose of data that comes out of this thing | Useful for wrapping one's head around the intent/implementation in a reusable way |
-| assignments/ | Markdown class exercises | Useful for teaching students about the world of networked flows and webs of systems together |
+* **processing/** — The core instrument. Crack open `FreqZoneTriggers/FreqZoneTriggers.pde` first to see how thresholds, hysteresis, and cooldowns are narrated in code while you test routing live.
+* **docs/** — Cheat sheets for getting moving fast. Start with `docs/quickstart.md`, then `docs/osc_addresses.md` so you can wire OSC without guessing.
+* **examples/** — Quick probes to prove the pipes work. Run `examples/osc_listener.py` to sanity‑check OSC output before students start improvising.
+* **assignments/** — Guided labs that keep the teaching flow honest. Use them to stage short feedback loops while everyone experiments.
 
 ---
 Made for teaching & performance. Contributions welcome.
