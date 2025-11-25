@@ -15,6 +15,8 @@ A Processing (Java) sketch that slices the spectrum into tweakable bands and fir
 3. Optional: put `your_audio.mp3` in `processing/FreqZoneTriggers/data/`, press **P** in File mode.
 4. Enable **IAC Driver** (macOS: Audio MIDI Setup → MIDI Studio). The sketch auto‑targets ports matching `"IAC"`.
 
+Want the classroom-ready mental model? Start with **[Per-frame signal flow](docs/architecture.md)** — it walks through the exact `draw()` loop and calls out the identifiers you can grep while hacking.
+
 **Keys**:  
 `1/2` band select · `[ / ]` threshold · `; / '` hysteresis · `, / .` cooldown · `- / =` note · `c/C` CC · `i` solo selected band (OSC/MIDI only) · `B` burst · `S/O` save/load · `t/T` transpose · `d/D` list MIDI outs (quiet/loud, your call) · `L` live/file · `P` play · `SPACE` OSC toggle · `M` MIDI toggle
 
