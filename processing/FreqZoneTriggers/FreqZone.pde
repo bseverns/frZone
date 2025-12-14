@@ -98,6 +98,15 @@ boolean SHOW_HELP     = true;
 boolean SOLO_SELECTED_BAND = false;       // when true, only the selected band drives OSC/MIDI
 float   VELOCITY_CURVE     = 1.0f;        // pow(eN, curve)
 
+// --- Event logging (opt-in, CSV, one line per trigger)
+// Keep the file lightweight so you can email logs around or hand them to
+// students mid-lab without a second thought. Toggle with 'e', drop markers
+// with 'r'.
+boolean EVENT_LOG_ENABLED      = false;
+String  EVENT_LOG_CONDITION    = "baseline"; // rename per run to tag which tweak set you tested
+String  EVENT_LOG_DIR          = "logs";     // lives under data/
+String  EVENT_LOG_FILE_PREFIX  = "triggerlog";
+
 // --- Auto calibration
 // Treat this like a studio timer: call it out, wait for the countdown, then talk
 // about how thresholds move based on the percentile math below.
@@ -120,6 +129,10 @@ NetAddress oscDest;
 
 MidiOut midi;
 ArrayList<PendingNoteOff> noteOffQueue = new ArrayList<PendingNoteOff>();
+
+PrintWriter eventLogWriter;
+String      eventLogPath = "";
+int         eventMarkerCount = 0;
 
 // per-band trigger state
 // Think of BandTrigger as the worksheet for each frequency slice—every concept
@@ -278,6 +291,8 @@ void draw() {
         midi.noteOn(bt.midiNote, vel);
         noteOffQueue.add(new PendingNoteOff(bt.midiNote, now + MIDI_NOTE_LEN_MS));
       }
+
+      logTriggerEvent(bt, bt.smooth);
     }
   }
 
@@ -387,6 +402,11 @@ void drawOverlay() {
        "   Band: " + (selectedBand+1) + "/" + bands.length,
        10, 10);
 
+  String logLine = EVENT_LOG_ENABLED ?
+    ("Event log: " + (eventLogPath.equals("") ? "(pending)" : new File(eventLogPath).getName()) + "  (r = MARK)") :
+    "Event log: off (press e to start)";
+  text(logLine, 10, 26);
+
   if (!SHOW_HELP) return;
 
   int boxX = 10;
@@ -403,6 +423,7 @@ void drawOverlay() {
   text("MIDI device: " + (midi != null ? midi.getCurrentName() : "(none)"), boxX + 10, y); y += 18;
   text("Keyboard: 1/2 band  |  [/] threshold  |  ;/' hysteresis  |  ,/. cooldown  |  -/= note  |  c/C CC  |  t/T transpose  |  S/O save/load", boxX + 10, y); y += 18;
   text("Toggles: L live/file  |  P play/pause file  |  SPACE OSC  |  M MIDI  |  H help", boxX + 10, y); y += 18;
+  text("Logging: e start/stop CSV in data/" + EVENT_LOG_DIR + "  |  r drop MARK rows for recovery tests", boxX + 10, y); y += 18;
   text("Burst learn: B all bands, Shift+B selected  |  MIDI outputs: D list, Shift+D cycle", boxX + 10, y); y += 18;
   text("Calibration (K start, Esc cancels): duration " + CAL_MS + "ms  perc " + CAL_PERCENTILE + "  mult " + CAL_MULT + "  H " + CAL_HYST + "  cooldown " + CAL_COOLDOWN + "ms", boxX + 10, y); y += 22;
 
@@ -419,6 +440,67 @@ void drawOverlay() {
     rect(boxX + 170, y + 3, (boxW - 192) * progress, 12);
     y += 20;
   }
+}
+
+// ---------- Event logging ----------
+
+void toggleEventLog() {
+  if (EVENT_LOG_ENABLED) {
+    closeEventLog();
+    EVENT_LOG_ENABLED = false;
+    println("Event log stopped.");
+  } else {
+    ensureEventLogWriter();
+    if (eventLogWriter != null) {
+      EVENT_LOG_ENABLED = true;
+      eventMarkerCount = 0;
+      println("Event log -> " + eventLogPath);
+    }
+  }
+}
+
+void ensureEventLogWriter() {
+  if (eventLogWriter != null) return;
+  try {
+    File dir = new File(dataPath(EVENT_LOG_DIR));
+    if (!dir.exists()) dir.mkdirs();
+
+    String fname = String.format("%s-%d.csv", EVENT_LOG_FILE_PREFIX, System.currentTimeMillis());
+    eventLogPath = new File(dir, fname).getAbsolutePath();
+    eventLogWriter = createWriter(eventLogPath);
+    eventLogWriter.println("t_ms,condition,mode,band,f_lo,f_hi,energyN,threshold,hysteresis,cooldown_ms");
+    eventLogWriter.flush();
+  } catch (Exception e) {
+    println("Failed to open event log: " + e);
+    eventLogWriter = null;
+    eventLogPath = "";
+  }
+}
+
+void logTriggerEvent(BandTrigger bt, float energyNorm) {
+  if (!EVENT_LOG_ENABLED || eventLogWriter == null) return;
+  String mode = USE_LIVE ? "LIVE" : "FILE";
+  String line = String.format("%d,%s,%s,%d,%.2f,%.2f,%.6f,%.3f,%.3f,%d",
+                              millis(), EVENT_LOG_CONDITION, mode, bt.idx,
+                              bt.fLo, bt.fHi, energyNorm, bt.threshold, bt.hysteresis, bt.cooldownMs);
+  eventLogWriter.println(line);
+  eventLogWriter.flush();
+}
+
+void logMarker(String label) {
+  if (!EVENT_LOG_ENABLED || eventLogWriter == null) return;
+  String cleanLabel = label.replace(",", " ");
+  String line = String.format("%d,MARK,%s", millis(), cleanLabel);
+  eventLogWriter.println(line);
+  eventLogWriter.flush();
+}
+
+void closeEventLog() {
+  if (eventLogWriter != null) {
+    try { eventLogWriter.flush(); eventLogWriter.close(); } catch (Exception ignore) {}
+  }
+  eventLogWriter = null;
+  eventLogPath = "";
 }
 
 // ---------- OSC ----------
@@ -659,6 +741,17 @@ void keyPressed() {
 
   if (key == ' ') { OSC_ENABLED = !OSC_ENABLED; }
   if (key == 'm' || key == 'M') { if (MIDI_ENABLED) allNotesOff(); MIDI_ENABLED = !MIDI_ENABLED; }
+  if (key == 'e' || key == 'E') { toggleEventLog(); }
+  if (key == 'r' || key == 'R') {
+    if (EVENT_LOG_ENABLED) {
+      eventMarkerCount++;
+      String label = "mark-" + eventMarkerCount;
+      logMarker(label);
+      println("MARK -> " + label + " at " + millis() + "ms");
+    } else {
+      println("MARK ignored (log is off; press 'e' first).");
+    }
+  }
 
   if (key == 'l' || key == 'L') {
     USE_LIVE = !USE_LIVE;
@@ -700,6 +793,7 @@ void focusLost() {
 
 void stop() {
   allNotesOff();
+  closeEventLog();
   if (player != null) player.close();
   if (liveIn != null) liveIn.close();
   if (midi != null) midi.close();
