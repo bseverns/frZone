@@ -1,20 +1,20 @@
 flowchart TB
-  %% Figure 3B — Aims → supports (compact mapping)
+  %% Figure 3 — Readable Triggers aims → frZone supports
 
   RT["Readable Triggers<br/>Mapping legibility layer"]
 
   RT --> N["Narratability"]
   N --> N1["Bands as named regions"]
-  N --> N2["Two lanes: energy vs trigger"]
+  N --> N2["Two lanes: energy and trigger"]
 
   RT --> R["Recoverability"]
   R --> R1["Minimal mapping.json"]
-  R --> R2["Notes off queue / clean shutdown"]
+  R --> R2["Queued note offs and clean exit"]
 
   RT --> T["Teachability"]
   T --> T1["Cheat sheet overlay"]
-  T --> T2["Visible toggles + solo band mode"]
+  T --> T2["Visible toggles and solo band mode"]
 
   RT --> P["Portability"]
-  P --> P1["mapping.json is shareable/versionable"]
-  P --> P2["Burst learn handshake<br/>CC sweep + note tap"]
+  P --> P1["mapping.json is shareable"]
+  P --> P2["Burst learn handshake<br/>CC sweep and note tap"]

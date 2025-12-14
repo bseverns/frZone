@@ -158,55 +158,77 @@ Velocity scales with the current band energy, and note-offs are queued for a fix
 
 ---
 
-## 4. Readable Triggers: mapping legibility layer
-**Claim:** frZone treats mapping as a first-class artifact: learnable, narratable, and portable.
+4. Readable Triggers: mapping legibility layer
 
-### 4.1 Legibility primitives (name what the system already makes visible)
-- **Band as named region:** a stable vocabulary (“kick/snare/hat bands”).
-- **Two-lane control:** energy stream (continuous) vs trigger stream (events).
-- **Cheat-sheet overlay:** the instrument narrates itself while running.
-- **Solo band mode:** isolate one lane while teaching/patching.
-- **Burst Learn:** a standardized “handshake” (CC sweep + note tap) that external apps can quickly learn.
+Mappings are where audio-to-control systems either become shareable instruments or collapse into private technique. In many tools, mappings live as tacit knowledge: the system may work, but only the operator can explain why, and the mapping cannot travel without them. frZone treats mapping as a first-class artifact: something designed to be learnable, narratable, and portable across people, sessions, and toolchains. This legibility layer is not separate from performance; it is what allows performance setups to be rebuilt, taught, and trusted.
 
-### 4.2 A mini-framework (you can present as bullets or a diagram)
-- **Narratability:** mapping can be spoken in one breath (band → target → behavior).
-- **Recoverability:** save/load mapping JSON; “panic” and clean shutdown.
-- **Teachability:** controls discoverable without leaving the instrument.
-- **Portability:** minimal `mapping.json` is shareable; burst-learn bridges tool ecosystems.
+4.1 Legibility primitives (name what the system already makes visible)
 
-**Figure callout:** *Figure 3: “Readable Triggers” framework diagram (4 principles).*
+Write this subsection like a list of what the system makes easy to point at. Each bullet can be 1–2 sentences.
 
-### 4.3 Use-case vignettes (draw from `assignments/`)
-- **Vignette A — Calibrate Your Bands:** equalize trigger rates, tune hysteresis/cooldown to remove chatter.
-  - TODO: short paragraph + a screenshot of band bars with thresholds visible.
-- **Vignette B — Build a Performer Map:** map `/bandEnergy` to a continuous visual parameter and `/bandTrigger` to a discrete event.
-  - TODO: 1 diagram of mapping + 1 sentence on why two lanes help.
-- **Vignette C — Chain Reaction:** one group’s audio drives another group’s system; documentation enables reproducibility.
-  - TODO: short paragraph + routing diagram.
+Band as named region. Bands are treated as stable regions rather than abstract indices. The frequency bounds are fixed and teachable, and the system supports a consistent vocabulary that students and collaborators can adopt (“kick band,” “snare band,” “hat band”) even when the audio source changes.
+
+Two-lane control. frZone separates continuous modulation from discrete event triggering. This makes mappings easier to reason about: energy is “how much,” triggers are “when,” and downstream targets can be chosen accordingly without overloading one signal.
+
+Cheat-sheet overlay. The instrument narrates itself while running. Control shortcuts, modes, and routing status are discoverable in the moment, so mapping work does not require a second document or a second screen.
+
+Solo band mode. Isolating a band supports patching and debugging as a teaching action: students can tune one region, observe cause and effect, then reintroduce complexity deliberately.
+
+Burst learn. Burst learn acts as a standardized handshake with external environments by emitting a predictable CC sweep and note tap. In practice, this reduces setup friction and makes “learning the mapping” an explicit step rather than a hidden ritual.
+
+(If you want an extra sentence tying this back to your consent-forward theme: “These primitives also make it easier to state what the system is doing and why, which is part of keeping sensing boundaries legible.”)
+
+4.2 A mini-framework
+
+You don’t have to claim novelty — present it as “four design aims frZone implements.”
+
+frZone’s mapping layer is organized around four practical design aims:
+
+Narratability. A mapping can be spoken in one breath: band → target → behavior. For example, “hat band energy drives feedback amount” or “snare band trigger cuts scenes.” If it cannot be said clearly, it will not be taught clearly.
+
+Recoverability. Mappings should survive interruption. Saving and loading a minimal mapping file supports rebuilding a known-good state after a crash, a classroom handoff, or a new machine. “Panic” behaviors (such as clearing notes) further support predictable exits.
+
+Teachability. Controls must remain discoverable without leaving the instrument. The cheat sheet and visible toggles turn common debugging steps into intentional learning moments rather than private operator tricks.
+
+Portability. Mappings should travel across tools and contexts. A minimal mapping.json supports sharing and versioning, while burst learn helps bridge ecosystems that prefer to “learn” controls through live gestures.
+
+Figure callout: Figure 3: Readable Triggers design aims and how frZone supports each.
+
+4.3 Use-case vignettes
+
+The goal is short, vivid, and tied back to the principles above. Each vignette can be 4–6 sentences.
+
+Vignette A — Calibrate Your Bands. Students begin by calibrating in a real room and then adjusting threshold, hysteresis, and cooldown to equalize trigger rates across bands. The work is intentionally audible and visible: small parameter changes produce immediate changes in stability and chatter. This activity turns calibration from a hidden preprocessing step into a learnable act of tuning, and it provides a shared language for why the system behaves as it does. (Optional sentence) The result is a mapping that is narratable (“this band fires less because cooldown is longer”) rather than mystical.
+
+Vignette B — Build a Performer Map. In performance-oriented mapping, students route /bandEnergy to a continuous visual parameter (for example, density or opacity) and /bandTrigger to a discrete event (for example, scene cut or strobe). The two-lane model reduces ambiguity: energy drives motion without requiring perfect thresholding, while triggers remain crisp and intentioned. This separation supports faster setup and clearer explanation, especially when mappings are shared between collaborators.
+
+Vignette C — Chain Reaction. In group work, one team’s audio becomes another team’s control input through OSC or MIDI routing. Because mappings are documented and recoverable, the receiving group can reconstruct the sender’s intent without constant supervision. The exercise stresses portability and consent-forward clarity: participants can describe what information crosses the boundary, where it goes, and how it is used. The value is not only the resulting piece, but the ability to reproduce the routing and mapping on a different day with different people.
 
 ---
 
 ## 5. Consent-forward sensing (design stance + concrete affordances)
 **Claim:** instruments used in classrooms/public contexts must be explicit about sensing boundaries.
 
-### 5.1 Data minimization and boundaries (state plainly)
-- frZone processes audio **locally** to compute **band energies**.
-- It outputs **features** (energies + triggers) rather than raw audio.
-- It persists only mapping metadata by default (`mapping.json` notes/CCs).
-- TODO: if you add logging for evaluation, describe it as *opt-in* and avoid PII.
+### 5.1 Data minimization and boundaries
+frZone performs audio analysis locally. It computes FFT-based features and derives per-band energies and trigger state in memory. Raw audio is not transmitted over the network. When enabled, OSC sending defaults to localhost and can be toggled at runtime (SPACE), so derived features do not leave the machine unless a user intentionally reroutes them. When outputs are enabled, frZone sends only derived features (energies and trigger events) rather than audio streams.
 
-### 5.2 Consent choreography (make it a diagram)
-A simple three-stage model:
-1) **Disclosure:** visible state (Live/File; OSC/MIDI on/off; ports/device).
-2) **Choice:** toggles for outputs; ability to run in File mode with no live capture.
-3) **Control:** kill-switch (“all notes off”), solo mode, strict MIDI targeting.
+By default, the only persistent data is mapping metadata stored in mapping.json (notes and CC assignments). Runtime state needed for smoothing and gating (such as smoothed energy, armed flags, and last trigger time) is short-lived and discarded as the instrument runs. If frZone is extended with session logging for evaluation, logging should remain opt-in and should avoid collecting identifying information.
 
-**Figure callout:** *Figure 4: Consent choreography diagram (Disclosure → Choice → Control).*
+5.2 Consent choreography (concrete controls)
 
-### 5.3 Why this matters (classroom + community contexts)
-- Power dynamics (teacher/student), shared rigs, public displays.
-- Readability is also ethical: the system should be interpretable by non-authors.
-- TODO: 1–2 sentences connecting to your broader practice language (agency, open tools, loud documentation).
+Consent in interactive systems is not a single agreement; it is a choreography that remains available while the instrument is running. frZone implements this choreography through three stages that map directly onto visible runtime state and explicit controls.
+
+Disclosure. frZone keeps key state legible while running by providing a toggleable help overlay (H) that displays the cheat sheet and the current device context. This supports “saying aloud” what the system is doing during teaching and setup: whether the system is in Live vs File mode (L), whether OSC sending is enabled (SPACE), whether MIDI sending is enabled (M), and whether auto-calibration is active (K to start, Esc to cancel).
+
+Choice. Outputs are opt-in at runtime. Users can enable or disable OSC sending with SPACE and MIDI sending with M, and can explore in File mode (L, with P for play/pause) without live capture. Mapping choices are also explicit: the selected band and its behavior can be tuned live (threshold [ / ], hysteresis ; / ', cooldown , / .), and mappings can be saved or loaded (S / O) to support deliberate reuse rather than hidden state.
+
+Control. frZone supports safe interruption and recovery. Toggling MIDI sending (M) also sends an all-notes-off gesture, reducing the risk of stuck notes on shared rigs. Auto-calibration can be started or cancelled (K / Esc) to keep the system predictable during transitions. Solo, targeted setup is supported through per-band selection (1 / 2) and selected-band burst learn (Shift+B), allowing students to isolate changes rather than perturbing the whole system at once.
+
+Figure callout: Figure 4: Consent choreography mapped to concrete runtime controls (Disclosure → Choice → Control).
+
+5.3 Why this matters (classroom + community contexts)
+
+In classrooms, power dynamics and shared infrastructure change what “interaction” means: students may not control the room, the rig, or the network. In public-facing contexts, participants may not know what an instrument is sensing or what is being transmitted. Making boundaries visible helps the system remain interpretable by non-authors, which is both a learning affordance and an ethical one. In a classroom, these controls make it possible to pause, explain, and reconfigure without breaking the “hot” runtime, which reduces reliance on operator-mastery and supports peer-to-peer learning. This approach aligns with frZone’s broader goal: open tools, loud documentation, and agency that can be shared rather than guarded.
 
 ---
 

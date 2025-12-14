@@ -1,0 +1,20 @@
+flowchart TB
+  %% Figure 4 — Consent choreography grounded in frZone controls
+
+  C["Consent choreography<br/>while the instrument is running"]
+
+  C --> D["Disclosure"]
+  D --> D1["Help overlay shows cheat sheet and device context (H)"]
+  D --> D2["Mode visible and switchable: Live or File (L), play/pause (P)"]
+  D --> D3["Output state is explicit: OSC on/off (SPACE), MIDI on/off (M)"]
+  D --> D4["Calibration state is explicit: start (K), cancel (Esc)"]
+
+  C --> O["Choice"]
+  O --> O1["Opt-in outputs: toggle OSC (SPACE) and MIDI (M)"]
+  O --> O2["Explore without live capture: File mode (L)"]
+  O --> O3["Deliberate mappings: save/load (S/O), tune band params ([ ] ; ' , .)"]
+
+  C --> K["Control"]
+  K --> K1["Safe interruption: MIDI toggle sends all-notes-off (M)"]
+  K --> K2["Predictable calibration: start or cancel (K / Esc)"]
+  K --> K3["Targeted setup: select band (1/2), burst learn selected (Shift+B)"]
