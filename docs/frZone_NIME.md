@@ -69,49 +69,92 @@ frZone is designed to be teachable and recallable: an in-app cheat-sheet, explic
 
 ---
 
-## 3. System: frZone as a trigger instrument
-### 3.1 Design goals:
-frZone was built as a low latency, classroom safe bridge from sound to control. It targets IAC compatible MIDI workflows and uses clear, visible toggles so students can explore without needing operator mastery to stay oriented. The system is designed to be taught: its behavior is meant to be explainable in plain language, and its controls are meant to invite confident adjustment rather than trial by confusion.
+3. System: frZone as a trigger instrument
+3.1 Design goals
 
-The core design choice is a readable per band parameter set. Each band exposes a small vocabulary of controls that shape behavior in predictable ways, allowing users to make informed choices while listening: threshold determines when a band becomes active, hysteresis prevents chatter and supports stable rearming, and cooldown defines the minimum time between triggers.
+frZone was built as a low latency, classroom safe bridge from sound to control. It targets IAC compatible MIDI workflows and uses clear, visible toggles so students can explore without needing operator mastery to stay oriented. The system is designed to be taught: its behavior is explainable in plain language, and its controls invite confident adjustment rather than trial by confusion.
 
-frZone produces control data through two parallel lanes. The continuous lane sends a steady stream of band energy values, suitable for driving parameters that benefit from ongoing motion. The event lane sends discrete on and off style messages when thresholds are crossed, suitable for rhythmic or state change behaviors.
+The core design choice is a readable per band parameter set. Each band exposes a small vocabulary of controls that shape behavior in predictable ways: threshold determines when a band becomes active, hysteresis prevents chatter and supports stable rearming, and cooldown defines the minimum time between triggers.
 
-Mapping is intentionally lightweight. Control outputs are defined in a simple JSON file, and a burst learn gesture can be used per band to quickly configure networked or external targets during setup.
+frZone produces control data through two parallel lanes. The continuous lane sends a steady stream of band energy values, suited to parameters that benefit from ongoing motion. The event lane sends discrete messages when thresholds are crossed, suited to rhythmic behaviors and state changes.
 
-### 3.2 Per-frame signal flow (grounded in repo)
-**Use this as prose; it matches `docs/architecture.md` and the main `draw()` loop.**
+Mapping is intentionally lightweight. Control outputs are defined in a simple JSON file, and a burst learn gesture can be used per band to quickly configure targets during setup in modular video environments.
 
-1) Select source (Live vs File)  
-2) FFT forward on current buffer  
-3) Sum energy per band between bounds  
-4) Auto-calibration option: percentile sampling → thresholds + defaults  
-5) Normalize energy relative to threshold (0..1 target)  
-6) Smooth energy (attack/release)  
-7) Trigger gate: threshold + hysteresis re-arm + cooldown  
-8) Output:
-   - OSC: `/bandEnergy` and `/bandTrigger`
-   - MIDI: per-band CC stream + note taps with scheduled note-offs
+3.2 Per-frame signal flow
 
-**Concrete current parameters (from repo, include in text or a table):**
-- Band bounds: `{0, 200, 800, 3000, 8000, 20000}` (5 bands)
-- Energy smoothing: `ENERGY_ATTACK=0.40`, `ENERGY_RELEASE=0.15`
-- Calibration defaults: `CAL_MS=2000`, `CAL_PERCENTILE=0.80`, `CAL_MULT=1.10`, `CAL_HYST=1.15`, `CAL_COOLDOWN=120ms`
-- OSC: host `127.0.0.1`, port `9000` (out), listen `9001` (inbound tweaks)
+Boundaries and defaults. frZone is designed to make its boundaries visible. Analysis is performed locally: the system reads an audio buffer, computes an FFT, and derives per-band features (energy and trigger state) in memory. Raw audio is not transmitted. Retained values are limited to short-lived per-band state required for smoothing and gating (for example: smoothed energy, armed state, and last trigger time).
 
-**Figure callout:** *Figure 2: per-frame flow diagram with the two output lanes.*
+Network output is explicit and toggleable. When OSC is enabled, frZone transmits derived features to 127.0.0.1:8000 by default and listens on 127.0.0.1:8001 for optional inbound parameter updates. MIDI output is routed through the selected device (including IAC) rather than broadcast. These defaults support consent-forward teaching and public-facing use by making it easy to state what is processed locally, what is sent, where it goes, and what is not retained.
 
-### 3.3 Outputs
-**OSC**
-- `/bandEnergy (idx, fLo, fHi, energyN 0..1)` — continuous, smoothed
-- `/bandTrigger (idx, fLo, fHi, energy, threshold, hysteresis, cooldownMs)` — event pulses
+Each render frame, frZone performs the same sequence of operations, whether the source is live input or file playback:
 
-**MIDI**
-- CC per band (default 20–24)
-- Notes per band (default drum-ish notes 36, 38, 42, 46, 49)
-- Velocity scales with energy; note-offs queued for fixed duration
+Select source (Live vs File) and read the current audio buffer.
 
-**Table idea:** *Table 1: Outputs, rates, and typical use cases (TouchDesigner, Signal Culture, etc.).*
+Compute FFT on the current buffer.
+
+Sum band energy by accumulating FFT magnitudes between each pair of frequency bounds, producing one energy value per band.
+
+Optional auto calibration samples band energies over a short window and sets per-band thresholds, along with initial hysteresis and cooldown defaults. During calibration, trigger output can be suppressed to keep behavior predictable while students tune the room and gain staging.
+
+Normalize energy relative to each band’s threshold into a 0 to 1 target range.
+
+Smooth energy with an attack and release filter to produce a stable continuous control signal.
+
+Gate triggers using threshold crossing with hysteresis-based rearming and a cooldown timer to avoid chatter and repeated firing.
+
+Emit outputs via two lanes:
+
+Continuous lane: per-band smoothed energy is sent as OSC /bandEnergy and as a MIDI CC stream.
+
+Event lane: when a trigger fires, OSC /bandTrigger is sent and a MIDI note is tapped, with note-offs scheduled via a short internal queue.
+
+Figure callout: Figure 2: Per-frame flow diagram showing both output lanes.
+
+**Table 1. Default parameters in the current implementation.**
+| Category | Parameter | Value | Notes |
+|---|---|---|---|
+| Bands | Frequency bounds | `{0, 200, 800, 3000, 8000, 20000}` | 5 bands: 0–200, 200–800, 800–3000, 3000–8000, 8000–20000 |
+| Smoothing | `ENERGY_ATTACK` | `0.40` | Faster response on rising energy |
+| Smoothing | `ENERGY_RELEASE` | `0.15` | Slower decay on falling energy |
+| Calibration | `CAL_MS` | `2000 ms` | Sampling window |
+| Calibration | `CAL_PERCENTILE` | `0.80` | Percentile used to set threshold |
+| Calibration | `CAL_MULT` | `1.10` | Scales threshold above sampled statistic |
+| Calibration | `CAL_HYST` | `1.15` | Initial hysteresis factor |
+| Calibration | `CAL_COOLDOWN` | `120 ms` | Initial cooldown |
+| Calibration | `SUPPRESS_TRIGGERS_WHILE_CAL` | `true` | Suppresses trigger output while calibrating |
+| OSC | Host | `127.0.0.1` | Local by default |
+| OSC | TX port | `8000` | Control output |
+| OSC | RX port | `8001` | Optional inbound parameter tweaks |
+| OSC | Energy address | `/bandEnergy` | Continuous lane |
+| OSC | Trigger address | `/bandTrigger` | Event lane |
+
+3.3 Outputs
+
+frZone exposes two output lanes that mirror two common interaction needs in audiovisual practice: continuous modulation and discrete event control. Both lanes are available over OSC and MIDI, allowing the same band activity to drive parameter motion, rhythmic triggering, or state changes depending on the downstream tool.
+
+OSC (UDP). When enabled, frZone transmits to 127.0.0.1:8000 by default and listens on 127.0.0.1:8001 for optional inbound parameter updates.
+
+/bandEnergy (idx, fLo, fHi, energyN)
+A continuous, smoothed stream where energyN is normalized to a 0–1 range.
+
+/bandTrigger (idx, fLo, fHi, energy, threshold, hysteresis, cooldownMs)
+A discrete event pulse emitted when the trigger gate fires. Including the gating parameters makes the event interpretable during teaching and collaboration and supports downstream logging.
+
+MIDI. frZone supports IAC friendly MIDI output in two complementary forms:
+
+Per-band CC stream (defaults CC 20–24) driven by smoothed band energy.
+
+Per-band note taps (defaults 36, 38, 42, 46, 49) intended to patch cleanly into environments that treat notes as triggers.
+
+Velocity scales with the current band energy, and note-offs are queued for a fixed duration so downstream tools receive a predictable on/off gesture without requiring tight timing logic.
+
+**Table 2. frZone outputs, rates, and typical use cases.**
+| Output | Type | Rate | Typical downstream use | Notes |
+|---|---|---|---|---|
+| OSC `/bandEnergy (idx, fLo, fHi, energyN)` | Continuous | Per frame, per band | TouchDesigner / Signal Culture style modulation (opacity, feedback, particle density, shader params) | `energyN` is smoothed and normalized 0..1 |
+| OSC `/bandTrigger (idx, fLo, fHi, energy, threshold, hysteresis, cooldownMs)` | Event | On trigger | Scene cuts, strobe hits, sampler triggers, state toggles | Includes gating params for legibility and debugging |
+| MIDI CC 20–24 (per band) | Continuous | Per frame, per band | Any MIDI-mappable parameter; DAW automation; A/V control bridges | Uses smoothed energy; easy IAC routing |
+| MIDI notes 36, 38, 42, 46, 49 (per band) | Event | On trigger | Drum racks, clip launching, discrete switches in visual tools | Velocity scales with energy; note-off queued for fixed duration |
 
 ---
 

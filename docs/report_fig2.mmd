@@ -1,0 +1,48 @@
+flowchart TB
+  %% Figure 2 — per-frame processing (conceptual)
+
+  START["Each frame (draw)"] --> MODE{"Source mode"}
+  MODE -->|LIVE| BUF1["Read live audio buffer"]
+  MODE -->|FILE| BUF2["Read playback buffer"]
+
+  BUF1 --> FFT["FFT.forward(buffer)"]
+  BUF2 --> FFT
+
+  FFT --> LOOP["Repeat for each band i"]
+
+  subgraph PERBAND["Per band i"]
+    SUM["Sum FFT bins<br/>between fLo..fHi"] --> CAL{"Calibrating?"}
+
+    CAL -->|Yes| ACC["Accumulate band sums<br/>for CAL_MS window"]
+    ACC --> DONE{"Calibration window done?"}
+    DONE -->|Yes| SET["Set threshold from percentile<br/>then set hysteresis + cooldown"]
+    DONE -->|No| NORM
+
+    CAL -->|No| NORM["Normalize energy<br/>sum / threshold → 0..1"]
+
+    SET --> NORM
+    NORM --> SMOOTH["Attack/Release filter<br/>smoothedEnergy[i]"]
+
+    %% Continuous lane happens every frame
+    SMOOTH --> CONT["Send band energy<br/>OSC /bandEnergy + MIDI CC"]
+
+    %% Trigger lane is gated by state
+    SMOOTH --> ARMED{"Armed?"}
+    ARMED -->|No| REARM{"sum < threshold / hysteresis?"}
+    REARM -->|Yes| ARM_ON["armed = true"]
+    REARM -->|No| NEXT
+
+    ARMED -->|Yes| FIRE{"sum ≥ threshold<br/>and cooldown passed?"}
+    FIRE -->|Yes| TRIG["Trigger event:<br/>lastTriggerMs = now<br/>armed = false"]
+    TRIG --> OUT["OSC /bandTrigger<br/>+ MIDI note hit"]
+    FIRE -->|No| NEXT
+
+    ARM_ON --> NEXT["Next band"]
+    CONT --> NEXT
+    OUT --> NEXT
+  end
+
+  LOOP --> PERBAND
+  NEXT --> LOOP
+
+  LOOP --> END["Render UI + cheat sheet overlay"]

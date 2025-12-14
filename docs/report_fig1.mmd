@@ -1,0 +1,40 @@
+flowchart TB
+  %% Figure 1 — frZone system pipeline + output lanes
+
+  subgraph IN["Inputs"]
+    A1["Live input<br/>mic / line"] --> B["Audio buffer"]
+    A2["File playback"] --> B
+  end
+
+  B --> C["FFT"]
+  C --> D["Band energy sums<br/>(5 frequency zones)"]
+
+  subgraph CAL["Calibration (pedagogical)"]
+    K["Quick calibration window<br/>(percentile-based)"] --> T["Set per-band threshold<br/>+ hysteresis + cooldown"]
+  end
+  D --> T
+  T --> E["Normalize energy vs threshold<br/>(0..1 clamp)"]
+
+  E --> F["Attack/Release smoothing<br/>(smoothed energy)"]
+  D --> G["Trigger gate<br/>threshold + hysteresis + cooldown"]
+
+  subgraph LANE_A["Lane A: Continuous energy"]
+    F --> O1["OSC /bandEnergy<br/>(idx, fLo, fHi, energy)"]
+    F --> M1["MIDI CC stream<br/>(per band)"]
+  end
+
+  subgraph LANE_B["Lane B: Discrete triggers"]
+    G --> O2["OSC /bandTrigger<br/>(idx, fLo, fHi, energy, params)"]
+    G --> M2["MIDI note hits<br/>(on/off queue)"]
+  end
+
+  subgraph LEG["Legibility + teaching scaffolds"]
+    H["In-app control cheat sheet"] --> S["Students + operators"]
+    J["mapping.json + mapping docs"] --> S
+  end
+
+  subgraph CTRL["Controls"]
+    P["Adjust threshold / hysteresis / cooldown<br/>note / CC"] --> G
+    P --> E
+    X["Inbound OSC parameter updates"] --> P
+  end
