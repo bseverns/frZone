@@ -1,10 +1,18 @@
-# Tools: trigger logging + Figure 5
+# Tools: trigger logging + rig alignment
 
 This folder is the lab bench for the tiny CSV logger and the even tinier Figure 5 generator. It is written like a scratchpad so students (or future you) can see the intent, not just the commands.
 
+## Rig alignment helpers
+
+- `sync_live_rig_authority.py`
+  - refreshes `atlas/live-rig.default.json` from the sibling `live-rig` checkout
+- `validate_rig_alignment.py`
+  - verifies the committed mirror plus `interop/frzone.rig.json`
+  - checks that the rig-tuned analysis lane stays pinned to the canonical `analysis.*` vocabulary
+
 ## How to log triggers
 1. Run the Processing sketch as usual.
-2. Press **`e`** to start the CSV logger. A filename appears in the HUD; files land in `processing/FreqZoneTriggers/data/logs/`.
+2. Press **`e`** to start the CSV logger. A filename appears in the HUD; files land in `processing/FreqZone/data/logs/`.
 3. Press **`r`** to drop a `MARK` row whenever you change conditions (mute, bypass, etc.). Those rows drive the recovery-time math.
 4. Press **`e`** again to close the log when you are done. The file is already headered for the analysis script.
 

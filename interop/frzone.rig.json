@@ -1,0 +1,62 @@
+{
+  "contractVersion": "1.0.0",
+  "profile": "frzone",
+  "authorityMirror": "atlas/live-rig.default.json",
+  "runtime": {
+    "rigTunedMode": true,
+    "midi": {
+      "deviceHint": "IAC",
+      "channel": 15,
+      "strict": true,
+      "sendNotes": false,
+      "sendCCs": true
+    },
+    "osc": {
+      "host": "127.0.0.1",
+      "outPort": 8000,
+      "inPort": 8001,
+      "legacyEnergyAddress": "/bandEnergy",
+      "legacyTriggerAddress": "/bandTrigger",
+      "semanticTriggerPrefix": "/analysis/trigger/"
+    }
+  },
+  "analysisLane": {
+    "semanticBands": [
+      {
+        "semanticId": "analysis.low_band",
+        "label": "Low Band",
+        "sourceBandIndex": 0,
+        "cc": 20,
+        "oscAddress": "/analysis/low_band"
+      },
+      {
+        "semanticId": "analysis.mid_band",
+        "label": "Mid Band",
+        "sourceBandIndex": 2,
+        "cc": 22,
+        "oscAddress": "/analysis/mid_band"
+      },
+      {
+        "semanticId": "analysis.upper_mid_band",
+        "label": "Upper Mid Band",
+        "sourceBandIndex": 3,
+        "cc": 23,
+        "oscAddress": "/analysis/upper_mid_band"
+      },
+      {
+        "semanticId": "analysis.high_band",
+        "label": "High Band",
+        "sourceBandIndex": 4,
+        "cc": 24,
+        "oscAddress": "/analysis/high_band"
+      }
+    ],
+    "nonCanonicalBands": [
+      {
+        "sourceBandIndex": 1,
+        "label": "Low Mid Support Band",
+        "notes": "Kept for classroom tuning and local-only legacy /bandEnergy output. It is intentionally omitted from the canonical live-rig analysis lane."
+      }
+    ]
+  }
+}

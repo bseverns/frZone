@@ -42,6 +42,7 @@ boolean USE_LIVE   = true;                // default input (toggle 'L')
 String  AUDIO_FILE = "ReadySet.mp3";     // put in data/ folder
 int     AUDIO_BUF  = 2048;
 float   AUDIO_SR   = 44100;
+boolean RIG_TUNED_MODE = false;          // false = classroom/generic, true = live-rig analysis lane
 
 // --- Frequency bands (Hz) - endpoints; N bands = bounds.length-1
 // Treat this like a lab knob: have students sketch their target spectrum, then
@@ -56,6 +57,8 @@ float[] INIT_THRESH     = { 9, 6, 4, 3, 2 };
 float[] INIT_HYSTERESIS = { 1.5, 1.2, 1.1, 1.1, 1.0 };
 int[]   INIT_COOLDOWNMS = { 120, 120, 120, 140, 160 };
 int[]   MIDI_NOTES      = { 36, 38, 42, 46, 49 };
+String  GENERIC_MAPPING_FILE = "mapping.json";
+String  RIG_PROFILE_FILE     = "frzone.rig.json";
 
 // --- OSC config
 // Default loopback works out of the box in class. Encourage students to change
@@ -133,6 +136,28 @@ ArrayList<PendingNoteOff> noteOffQueue = new ArrayList<PendingNoteOff>();
 PrintWriter eventLogWriter;
 String      eventLogPath = "";
 int         eventMarkerCount = 0;
+String      runtimeModeLabel = "GENERIC";
+String      rigProfilePath = "";
+
+class SemanticBandBinding {
+  String semanticId;
+  String label;
+  int sourceBandIndex;
+  int cc;
+  String oscAddress;
+  String triggerAddress;
+
+  SemanticBandBinding(String semanticId, String label, int sourceBandIndex, int cc, String oscAddress, String triggerAddress) {
+    this.semanticId = semanticId;
+    this.label = label;
+    this.sourceBandIndex = sourceBandIndex;
+    this.cc = cc;
+    this.oscAddress = oscAddress;
+    this.triggerAddress = triggerAddress;
+  }
+}
+
+SemanticBandBinding[] rigSemanticBands = new SemanticBandBinding[0];
 
 // per-band trigger state
 // Think of BandTrigger as the worksheet for each frequency slice—every concept
@@ -175,7 +200,6 @@ void settings() {
 }
 
 void setup() {
-  surface.setTitle("Freq-Zone Triggers - L("+USE_LIVE+")  OSC("+OSC_ENABLED+")  MIDI("+MIDI_ENABLED+")");
   minim = new Minim(this);
 
   if (USE_LIVE) {
@@ -201,16 +225,23 @@ void setup() {
     bands[i] = new BandTrigger(i, flo, fhi, thr, hy, cd, note);
   }
 
+  configureRuntimeMode();
+
   osc = new OscP5(this, OSC_LISTEN_PORT);
   oscDest = new NetAddress(OSC_HOST, OSC_PORT);
 
   midi = new MidiOut(MIDI_DEVICE_HINT, MIDI_CHANNEL, MIDI_STRICT);
   MidiOut.listOutputs();
 
-  loadMapping("mapping.json");
+  if (RIG_TUNED_MODE) {
+    println("Rig-tuned mode keeps canonical bindings from " + rigProfilePath);
+  } else {
+    loadMapping(GENERIC_MAPPING_FILE);
+  }
 
   textFont(createFont("Menlo", 12));
   frameRate(60);
+  updateWindowTitle();
 }
 
 void draw() {
@@ -254,10 +285,15 @@ void draw() {
     boolean outputsActive = (!SOLO_SELECTED_BAND || b == selectedBand) && allowOutput;
 
     if (MIDI_ENABLED && MIDI_SEND_CCS && midi != null && outputsActive) {
-      int ccIndex = min(b, MIDI_CCS.length - 1);
-      int ccNum   = MIDI_CCS[ccIndex];
-      int ccVal   = (int)round(lerp(MIDI_CC_MIN, MIDI_CC_MAX, bt.smooth));
-      midi.cc(ccNum, ccVal);
+      int ccVal = (int)round(lerp(MIDI_CC_MIN, MIDI_CC_MAX, bt.smooth));
+      if (RIG_TUNED_MODE) {
+        SemanticBandBinding binding = rigBindingForBand(b);
+        if (binding != null) midi.cc(binding.cc, ccVal);
+      } else {
+        int ccIndex = min(b, MIDI_CCS.length - 1);
+        int ccNum   = MIDI_CCS[ccIndex];
+        midi.cc(ccNum, ccVal);
+      }
     }
 
     if (OSC_ENABLED && SEND_OSC_ENERGY && outputsActive) {
@@ -267,6 +303,7 @@ void draw() {
       em.add(bt.fHi);
       em.add(bt.smooth);
       osc.send(em, oscDest);
+      if (RIG_TUNED_MODE) sendSemanticEnergy(bt);
     }
 
     long now = millis();
@@ -382,7 +419,7 @@ void drawBandBars(float[] energies, float maxBar) {
     text(nf(bt.fLo, 0, 0) + "-" + nf(bt.fHi, 0, 0) + " Hz", x + bw/2, h0 + hAvail + 4);
 
     textAlign(CENTER, BOTTOM);
-    String s = String.format("T%.1f H%.2f C%dms N%d(%s) CC%d", bt.threshold, bt.hysteresis, bt.cooldownMs, bt.midiNote, noteName(bt.midiNote), MIDI_CCS[min(b, MIDI_CCS.length-1)]);
+    String s = bandStatusLabel(bt, b);
     fill(b == selectedBand ? color(180, 240, 255) : 180);
     text(s, x + bw/2, h0 - 4);
   }
@@ -396,6 +433,7 @@ void drawOverlay() {
   String src = USE_LIVE ? "LIVE" : "FILE";
   String play = (!USE_LIVE && player != null && player.isPlaying()) ? "PLAY" : "PAUSE";
   text("Source: " + src + (USE_LIVE ? "" : "  " + play) +
+       "   Mode: " + runtimeModeLabel +
        "   OSC: " + (OSC_ENABLED ? "ON" : "off") +
        "   MIDI: " + (MIDI_ENABLED ? "ON" : "off") +
        "   Solo: " + (SOLO_SELECTED_BAND ? "SELECTED" : "all") +
@@ -423,6 +461,9 @@ void drawOverlay() {
   text("MIDI device: " + (midi != null ? midi.getCurrentName() : "(none)"), boxX + 10, y); y += 18;
   text("Keyboard: 1/2 band  |  [/] threshold  |  ;/' hysteresis  |  ,/. cooldown  |  -/= note  |  c/C CC  |  t/T transpose  |  S/O save/load", boxX + 10, y); y += 18;
   text("Toggles: L live/file  |  P play/pause file  |  SPACE OSC  |  M MIDI  |  H help", boxX + 10, y); y += 18;
+  if (RIG_TUNED_MODE) {
+    text("Rig mode: Ch 15 analysis lane via " + RIG_PROFILE_FILE + "  |  semantic CCs 20/22/23/24  |  raw band 2 is local-only", boxX + 10, y); y += 18;
+  }
   text("Logging: e start/stop CSV in data/" + EVENT_LOG_DIR + "  |  r drop MARK rows for recovery tests", boxX + 10, y); y += 18;
   text("Burst learn: B all bands, Shift+B selected  |  MIDI outputs: D list, Shift+D cycle", boxX + 10, y); y += 18;
   text("Calibration (K start, Esc cancels): duration " + CAL_MS + "ms  perc " + CAL_PERCENTILE + "  mult " + CAL_MULT + "  H " + CAL_HYST + "  cooldown " + CAL_COOLDOWN + "ms", boxX + 10, y); y += 22;
@@ -515,6 +556,7 @@ void sendOscTrigger(BandTrigger bt, float energy) {
   m.add(bt.hysteresis);
   m.add(bt.cooldownMs);
   osc.send(m, oscDest);
+  if (RIG_TUNED_MODE) sendSemanticTrigger(bt);
 }
 
 void oscEvent(OscMessage msg) {
@@ -532,8 +574,21 @@ void oscEvent(OscMessage msg) {
   if (param.equals("threshold")) bt.threshold = max(0.1f, val);
   if (param.equals("hysteresis")) bt.hysteresis = max(1.01f, val);
   if (param.equals("cooldown")) bt.cooldownMs = max(1, (int)val);
-  if (param.equals("note")) bt.midiNote = clamp127((int)val);
-  if (param.equals("cc")) { int ccIdx = min(idx, MIDI_CCS.length-1); MIDI_CCS[ccIdx] = clamp127((int)val); }
+  if (param.equals("note")) {
+    if (RIG_TUNED_MODE) {
+      println("Rig-tuned mode: ignoring inbound note remap for band " + (idx+1));
+    } else {
+      bt.midiNote = clamp127((int)val);
+    }
+  }
+  if (param.equals("cc")) {
+    if (RIG_TUNED_MODE) {
+      println("Rig-tuned mode: ignoring inbound CC remap for band " + (idx+1));
+    } else {
+      int ccIdx = min(idx, MIDI_CCS.length-1);
+      MIDI_CCS[ccIdx] = clamp127((int)val);
+    }
+  }
 }
 
 // ---------- Calibration ----------
@@ -624,6 +679,10 @@ void allNotesOff() {
 // ---------- Save/Load mapping ----------
 
 void saveMapping(String fname) {
+  if (RIG_TUNED_MODE) {
+    println("Rig-tuned mode: save is disabled; canonical bindings come from " + rigProfilePath);
+    return;
+  }
   try {
     // Keep it tiny on purpose: just notes + CCs. This leaves room for a follow-up
     // lesson on thresholds/hysteresis persistence without rewriting the basics.
@@ -643,6 +702,10 @@ void saveMapping(String fname) {
 }
 
 void loadMapping(String fname) {
+  if (RIG_TUNED_MODE) {
+    println("Rig-tuned mode: load is disabled; canonical bindings come from " + rigProfilePath);
+    return;
+  }
   try {
     String path = dataPath(fname);
     File f = new File(path);
@@ -669,6 +732,10 @@ void loadMapping(String fname) {
 // ---------- MIDI Learn Burst ----------
 
 void burstLearn(boolean onlySelected) {
+  if (RIG_TUNED_MODE) {
+    println("Rig-tuned mode: burst learn is disabled so the analysis lane stays canonical.");
+    return;
+  }
   if (!(MIDI_ENABLED && midi != null)) {
     println("Burst: MIDI not enabled or device not open.");
     return;
@@ -730,14 +797,32 @@ void keyPressed() {
   if (key == ',') bt.cooldownMs = max(10, int(bt.cooldownMs * 0.9f));
   if (key == '.') bt.cooldownMs = int(bt.cooldownMs * 1.1f);
 
-  if (key == '-') { bt.midiNote = clamp127(bt.midiNote - 1); println("Band " + (selectedBand+1) + " note -> " + bt.midiNote + " (" + noteName(bt.midiNote) + ")"); }
-  if (key == '=') { bt.midiNote = clamp127(bt.midiNote + 1); println("Band " + (selectedBand+1) + " note -> " + bt.midiNote + " (" + noteName(bt.midiNote) + ")"); }
+  if (key == '-') {
+    if (RIG_TUNED_MODE) println("Rig-tuned mode: note remap is disabled.");
+    else { bt.midiNote = clamp127(bt.midiNote - 1); println("Band " + (selectedBand+1) + " note -> " + bt.midiNote + " (" + noteName(bt.midiNote) + ")"); }
+  }
+  if (key == '=') {
+    if (RIG_TUNED_MODE) println("Rig-tuned mode: note remap is disabled.");
+    else { bt.midiNote = clamp127(bt.midiNote + 1); println("Band " + (selectedBand+1) + " note -> " + bt.midiNote + " (" + noteName(bt.midiNote) + ")"); }
+  }
 
-  if (key == 'c') { int idx = min(selectedBand, MIDI_CCS.length-1); MIDI_CCS[idx] = clamp127(MIDI_CCS[idx]-1); println("Band " + (selectedBand+1) + " CC -> " + MIDI_CCS[idx]); }
-  if (key == 'C') { int idx = min(selectedBand, MIDI_CCS.length-1); MIDI_CCS[idx] = clamp127(MIDI_CCS[idx]+1); println("Band " + (selectedBand+1) + " CC -> " + MIDI_CCS[idx]); }
+  if (key == 'c') {
+    if (RIG_TUNED_MODE) println("Rig-tuned mode: CC remap is locked to the committed profile.");
+    else { int idx = min(selectedBand, MIDI_CCS.length-1); MIDI_CCS[idx] = clamp127(MIDI_CCS[idx]-1); println("Band " + (selectedBand+1) + " CC -> " + MIDI_CCS[idx]); }
+  }
+  if (key == 'C') {
+    if (RIG_TUNED_MODE) println("Rig-tuned mode: CC remap is locked to the committed profile.");
+    else { int idx = min(selectedBand, MIDI_CCS.length-1); MIDI_CCS[idx] = clamp127(MIDI_CCS[idx]+1); println("Band " + (selectedBand+1) + " CC -> " + MIDI_CCS[idx]); }
+  }
 
-  if (key == 't') { for (int i = 0; i < bands.length; i++) bands[i].midiNote = clamp127(bands[i].midiNote - 1); println("Transposed all notes -1"); }
-  if (key == 'T') { for (int i = 0; i < bands.length; i++) bands[i].midiNote = clamp127(bands[i].midiNote + 1); println("Transposed all notes +1"); }
+  if (key == 't') {
+    if (RIG_TUNED_MODE) println("Rig-tuned mode: note transpose is disabled.");
+    else { for (int i = 0; i < bands.length; i++) bands[i].midiNote = clamp127(bands[i].midiNote - 1); println("Transposed all notes -1"); }
+  }
+  if (key == 'T') {
+    if (RIG_TUNED_MODE) println("Rig-tuned mode: note transpose is disabled.");
+    else { for (int i = 0; i < bands.length; i++) bands[i].midiNote = clamp127(bands[i].midiNote + 1); println("Transposed all notes +1"); }
+  }
 
   if (key == ' ') { OSC_ENABLED = !OSC_ENABLED; }
   if (key == 'm' || key == 'M') { if (MIDI_ENABLED) allNotesOff(); MIDI_ENABLED = !MIDI_ENABLED; }
@@ -766,12 +851,12 @@ void keyPressed() {
   if (key == 'B') { burstLearn(true); }
   if (key == 'd') { MidiOut.listOutputs(); }
   if (key == 'D') { if (midi != null) { allNotesOff(); midi.cycleToNext(); } }
-  if (key == 's' || key == 'S') { saveMapping("mapping.json"); }
-  if (key == 'o' || key == 'O') { loadMapping("mapping.json"); }
+  if (key == 's' || key == 'S') { saveMapping(GENERIC_MAPPING_FILE); }
+  if (key == 'o' || key == 'O') { loadMapping(GENERIC_MAPPING_FILE); }
   if (key == 'h' || key == 'H') { SHOW_HELP = !SHOW_HELP; }
   if (key == 'k' || key == 'K') { startCalibration(); }
 
-  surface.setTitle("Freq-Zone Triggers - L("+USE_LIVE+")  OSC("+OSC_ENABLED+")  MIDI("+MIDI_ENABLED+")");
+  updateWindowTitle();
 }
 
 void switchSource() {
@@ -799,4 +884,105 @@ void stop() {
   if (midi != null) midi.close();
   minim.stop();
   super.stop();
+}
+
+void configureRuntimeMode() {
+  runtimeModeLabel = RIG_TUNED_MODE ? "RIG" : "GENERIC";
+  rigSemanticBands = new SemanticBandBinding[0];
+  if (!RIG_TUNED_MODE) return;
+
+  rigProfilePath = new File(sketchPath(""), "../../interop/" + RIG_PROFILE_FILE).getAbsolutePath();
+  try {
+    JSONObject root = loadJSONObject(rigProfilePath);
+    JSONObject runtime = root.getJSONObject("runtime");
+    JSONObject midiRuntime = runtime.getJSONObject("midi");
+    JSONObject oscRuntime = runtime.getJSONObject("osc");
+    JSONObject analysisLane = root.getJSONObject("analysisLane");
+    JSONArray semanticBands = analysisLane.getJSONArray("semanticBands");
+
+    MIDI_DEVICE_HINT = midiRuntime.getString("deviceHint");
+    MIDI_CHANNEL = constrain(midiRuntime.getInt("channel") - 1, 0, 15);
+    MIDI_STRICT = midiRuntime.getBoolean("strict");
+    MIDI_SEND_NOTES = midiRuntime.getBoolean("sendNotes");
+    MIDI_SEND_CCS = midiRuntime.getBoolean("sendCCs");
+
+    OSC_HOST = oscRuntime.getString("host");
+    OSC_PORT = oscRuntime.getInt("outPort");
+    OSC_LISTEN_PORT = oscRuntime.getInt("inPort");
+    OSC_ENERGY_ADDR = oscRuntime.getString("legacyEnergyAddress");
+
+    rigSemanticBands = new SemanticBandBinding[semanticBands.size()];
+    for (int i = 0; i < semanticBands.size(); i++) {
+      JSONObject entry = semanticBands.getJSONObject(i);
+      String oscAddress = entry.getString("oscAddress");
+      String semanticId = entry.getString("semanticId");
+      String suffix = semanticId.substring(semanticId.indexOf('.') + 1);
+      String triggerAddress = oscRuntime.getString("semanticTriggerPrefix") + suffix;
+      rigSemanticBands[i] = new SemanticBandBinding(
+        semanticId,
+        entry.getString("label"),
+        entry.getInt("sourceBandIndex"),
+        entry.getInt("cc"),
+        oscAddress,
+        triggerAddress
+      );
+    }
+  } catch (Exception e) {
+    println("Rig profile load error: " + e);
+    println("Falling back to built-in rig defaults.");
+    rigProfilePath = "(built-in defaults)";
+    MIDI_DEVICE_HINT = "IAC";
+    MIDI_CHANNEL = 14;
+    MIDI_STRICT = true;
+    MIDI_SEND_NOTES = false;
+    MIDI_SEND_CCS = true;
+    OSC_HOST = "127.0.0.1";
+    OSC_PORT = 8000;
+    OSC_LISTEN_PORT = 8001;
+    OSC_ENERGY_ADDR = "/bandEnergy";
+    rigSemanticBands = new SemanticBandBinding[] {
+      new SemanticBandBinding("analysis.low_band", "Low Band", 0, 20, "/analysis/low_band", "/analysis/trigger/low_band"),
+      new SemanticBandBinding("analysis.mid_band", "Mid Band", 2, 22, "/analysis/mid_band", "/analysis/trigger/mid_band"),
+      new SemanticBandBinding("analysis.upper_mid_band", "Upper Mid Band", 3, 23, "/analysis/upper_mid_band", "/analysis/trigger/upper_mid_band"),
+      new SemanticBandBinding("analysis.high_band", "High Band", 4, 24, "/analysis/high_band", "/analysis/trigger/high_band")
+    };
+  }
+}
+
+SemanticBandBinding rigBindingForBand(int rawIndex) {
+  for (int i = 0; i < rigSemanticBands.length; i++) {
+    if (rigSemanticBands[i].sourceBandIndex == rawIndex) return rigSemanticBands[i];
+  }
+  return null;
+}
+
+void sendSemanticEnergy(BandTrigger bt) {
+  SemanticBandBinding binding = rigBindingForBand(bt.idx);
+  if (binding == null) return;
+  OscMessage m = new OscMessage(binding.oscAddress);
+  m.add(bt.smooth);
+  osc.send(m, oscDest);
+}
+
+void sendSemanticTrigger(BandTrigger bt) {
+  SemanticBandBinding binding = rigBindingForBand(bt.idx);
+  if (binding == null) return;
+  OscMessage m = new OscMessage(binding.triggerAddress);
+  m.add(bt.smooth);
+  osc.send(m, oscDest);
+}
+
+String bandStatusLabel(BandTrigger bt, int rawIndex) {
+  if (!RIG_TUNED_MODE) {
+    return String.format("T%.1f H%.2f C%dms N%d(%s) CC%d", bt.threshold, bt.hysteresis, bt.cooldownMs, bt.midiNote, noteName(bt.midiNote), MIDI_CCS[min(rawIndex, MIDI_CCS.length-1)]);
+  }
+  SemanticBandBinding binding = rigBindingForBand(rawIndex);
+  if (binding == null) {
+    return String.format("T%.1f H%.2f C%dms  LOCAL ONLY", bt.threshold, bt.hysteresis, bt.cooldownMs);
+  }
+  return String.format("T%.1f H%.2f C%dms  %s CC%d", bt.threshold, bt.hysteresis, bt.cooldownMs, binding.semanticId, binding.cc);
+}
+
+void updateWindowTitle() {
+  surface.setTitle("Freq-Zone Triggers [" + runtimeModeLabel + "] - L(" + USE_LIVE + ") OSC(" + OSC_ENABLED + ") MIDI(" + MIDI_ENABLED + ")");
 }
