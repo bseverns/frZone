@@ -4,7 +4,7 @@
 2) **Install libraries**: **Minim** and **oscP5** via Contribution Manager.  
 3) Open `processing/FreqZone/FreqZone.pde` and press ▶︎.
 4) **Live vs File**: Press **L** to toggle. Put an MP3 named `your_audio.mp3` in `data/` for File mode.
-5) **Routing**: MIDI defaults to the macOS **IAC Driver** (`MIDI_DEVICE_HINT = "IAC"`). Tap **d / D** to spit out the available outputs. Set `MIDI_STRICT=false` if you want a system default fallback.
+5) **Routing**: MIDI defaults to the macOS **IAC Driver** (`MIDI_DEVICE_HINT = "IAC"`). Tap **d / D** to list/cycle the available outputs, then tap **G** to send a MIDI hello through the selected route. If no route is open yet, **G** refreshes MIDI and tries Interstream/Signal Culture/network-session fallback hints before using the first openable output.
 
 ## Choosing a mode
 
@@ -14,7 +14,7 @@
 If you want the blow-by-blow of what happens each frame (source selection → FFT → band energy → smoothing → hysteresis/cooldown → OSC/MIDI sends), read **[Per-frame signal flow](architecture.md)**. It’s the punk‑rock notebook version of the `draw()` loop with search-friendly identifiers.
 
 ### Visual workflows
-- **Signal Culture** (Interstream / Re:Trace / Maelstrom): use **MIDI Learn** and the per‑band CCs (20–24 by default). Press **B** to send a learn burst.
+- **Signal Culture** (Interstream / Re:Trace / Maelstrom): use the per‑band CCs (20–24 by default). Press **G** to send a short MIDI hello when you need to confirm a blind receiver is alive; press **B** for a learn burst in generic mode.
 - **TouchDesigner**: OSC In CHOP on port 9000; listen to `/bandEnergy` (0..1) or `/bandTrigger` for pulses.
 - Want a zero-setup listener? Open `examples/osc/signal_culture_osc_listener.maxpat` (Max patch). It mirrors `python_receiver.py` so you can route frZone straight into Signal Culture tools or TouchDesigner without wiring the OSC plumbing yourself.
 

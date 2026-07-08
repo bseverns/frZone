@@ -13,6 +13,7 @@
  *   t / T          : transpose all notes -1 / +1
  *   S / O          : Save / Load mapping (to data/mapping.json)
  *   B              : burst learn (all bands); Shift+B = selected band only
+ *   G              : MIDI hello route check
  *   d / D          : list / cycle MIDI outputs in console
  *   L              : toggle Live vs File playback
  *   P              : play/pause file (when in file mode)
@@ -84,6 +85,7 @@ boolean MIDI_SEND_CCS     = true;         // continuous per-band CC stream
 int[]   MIDI_CCS          = {20, 21, 22, 23, 24};
 int     MIDI_CC_MIN       = 0;
 int     MIDI_CC_MAX       = 127;
+String[] MIDI_HELLO_FALLBACK_HINTS = { "Interstream", "Signal Culture", "Network", "Session" };
 
 // --- Energy smoothing
 // This is the lever that makes the visuals chill out. Have learners set attack
@@ -465,7 +467,7 @@ void drawOverlay() {
     text("Rig mode: Ch 15 analysis lane via " + RIG_PROFILE_FILE + "  |  semantic CCs 20/22/23/24  |  raw band 2 is local-only", boxX + 10, y); y += 18;
   }
   text("Logging: e start/stop CSV in data/" + EVENT_LOG_DIR + "  |  r drop MARK rows for recovery tests", boxX + 10, y); y += 18;
-  text("Burst learn: B all bands, Shift+B selected  |  MIDI outputs: D list, Shift+D cycle", boxX + 10, y); y += 18;
+  text("Burst learn: B all bands, Shift+B selected  |  MIDI hello: G  |  MIDI outputs: d list, Shift+D cycle", boxX + 10, y); y += 18;
   text("Calibration (K start, Esc cancels): duration " + CAL_MS + "ms  perc " + CAL_PERCENTILE + "  mult " + CAL_MULT + "  H " + CAL_HYST + "  cooldown " + CAL_COOLDOWN + "ms", boxX + 10, y); y += 22;
 
   if (isCalibrating) {
@@ -731,6 +733,78 @@ void loadMapping(String fname) {
 
 // ---------- MIDI Learn Burst ----------
 
+void midiHello() {
+  if (!MIDI_ENABLED) {
+    println("MIDI hello: MIDI is toggled off. Press M to enable MIDI output.");
+    return;
+  }
+  if (midi == null) midi = new MidiOut(MIDI_DEVICE_HINT, MIDI_CHANNEL, MIDI_STRICT);
+  if (!midi.isReady()) {
+    println("MIDI hello: no output is open; refreshing devices for hint \"" + MIDI_DEVICE_HINT + "\".");
+    midi.reconnect(MIDI_DEVICE_HINT, true);
+  }
+  if (!midi.isReady()) {
+    for (int i = 0; i < MIDI_HELLO_FALLBACK_HINTS.length; i++) {
+      String hint = MIDI_HELLO_FALLBACK_HINTS[i];
+      if (hint.equalsIgnoreCase(MIDI_DEVICE_HINT)) continue;
+      println("MIDI hello: trying fallback hint \"" + hint + "\".");
+      midi.reconnect(hint, true);
+      if (midi.isReady()) break;
+    }
+  }
+  if (!midi.isReady()) {
+    println("MIDI hello: preferred hint did not connect; trying the first openable MIDI output.");
+    midi.connectFirstAvailable();
+  }
+  if (!midi.isReady()) {
+    println("MIDI hello: no openable MIDI output. Press d to print device details; Interstream may be listening on an input that Java Sound cannot send to directly.");
+    return;
+  }
+  updateWindowTitle();
+
+  final boolean sendCCs = MIDI_SEND_CCS && MIDI_CCS.length > 0;
+  final boolean sendNotes = MIDI_SEND_NOTES && bands.length > 0;
+  if (!sendCCs && !sendNotes) {
+    println("MIDI hello: no MIDI lanes are enabled (MIDI_SEND_CCS and MIDI_SEND_NOTES are both false).");
+    return;
+  }
+
+  final int nCCs = min(bands.length, MIDI_CCS.length);
+  final int[] ccNums = new int[nCCs];
+  final int[] notes = new int[bands.length];
+  for (int i = 0; i < nCCs; i++) ccNums[i] = MIDI_CCS[i];
+  for (int i = 0; i < bands.length; i++) notes[i] = bands[i].midiNote;
+  final String deviceName = midi.getCurrentName();
+  final int humanChannel = MIDI_CHANNEL + 1;
+
+  new Thread(new Runnable() {
+    public void run() {
+      try {
+        System.out.println("MIDI hello -> " + deviceName + " on Ch " + humanChannel);
+        if (sendCCs) {
+          for (int i = 0; i < nCCs; i++) {
+            int cc = ccNums[i];
+            midi.cc(cc, MIDI_CC_MIN); Thread.sleep(20);
+            midi.cc(cc, MIDI_CC_MAX); Thread.sleep(80);
+            midi.cc(cc, MIDI_CC_MIN); Thread.sleep(80);
+          }
+        }
+        if (sendNotes) {
+          for (int i = 0; i < notes.length; i++) {
+            midi.noteOn(notes[i], 100);
+            Thread.sleep(60);
+            midi.noteOff(notes[i]);
+            Thread.sleep(60);
+          }
+        }
+        System.out.println("MIDI hello complete.");
+      } catch (Exception e) {
+        System.out.println("MIDI hello error: " + e);
+      }
+    }
+  }).start();
+}
+
 void burstLearn(boolean onlySelected) {
   if (RIG_TUNED_MODE) {
     println("Rig-tuned mode: burst learn is disabled so the analysis lane stays canonical.");
@@ -849,6 +923,7 @@ void keyPressed() {
 
   if (key == 'b') { burstLearn(false); }
   if (key == 'B') { burstLearn(true); }
+  if (key == 'g' || key == 'G') { midiHello(); }
   if (key == 'd') { MidiOut.listOutputs(); }
   if (key == 'D') { if (midi != null) { allNotesOff(); midi.cycleToNext(); } }
   if (key == 's' || key == 'S') { saveMapping(GENERIC_MAPPING_FILE); }

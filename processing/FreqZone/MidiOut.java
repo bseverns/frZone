@@ -12,6 +12,7 @@ public class MidiOut {
   private List<MidiDevice.Info> outputs = new ArrayList<MidiDevice.Info>();
   private int currentIndex = -1;
   private String lastDeviceName = "(none)";
+  private static MidiDevice.Info activeOutputInfo = null;
 
   public MidiOut(String nameHint, int channel, boolean strict) {
     this.ch = Math.max(0, Math.min(15, channel));
@@ -19,16 +20,25 @@ public class MidiOut {
     connectPreferred(nameHint, strict);
   }
 
-  // List all devices that accept Receivers.
+  // List all output devices that look like routable machine MIDI ports.
   public static void listOutputs() {
-    System.out.println("MIDI outputs (accept Receivers):");
-    for (MidiDevice.Info info : MidiSystem.getMidiDeviceInfo()) {
-      try {
-        MidiDevice dev = MidiSystem.getMidiDevice(info);
-        if (dev.getMaxReceivers() != 0) {
-          System.out.println("  - " + info.getName() + " - " + info.getDescription() + " [" + info.getVendor() + "]");
-        }
-      } catch (Exception ignore) {}
+    System.out.println("MIDI outputs openable by this sketch:");
+    MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
+    int idx = 0;
+    ArrayList<String> skipped = new ArrayList<String>();
+    for (MidiDevice.Info info : infos) {
+      OutputProbe probe = probeOutput(info);
+      if (probe.available) {
+        System.out.println(String.format("  %d: %s - %s [%s]", idx, info.getName(), info.getDescription(), info.getVendor()));
+        idx++;
+      } else if (probe.outputCandidate) {
+        skipped.add(String.format("  - %s - %s [%s]: %s", info.getName(), info.getDescription(), info.getVendor(), probe.reason));
+      }
+    }
+    if (idx == 0) System.out.println("  (no openable MIDI outputs found)");
+    if (!skipped.isEmpty()) {
+      System.out.println("Skipped MIDI output candidates:");
+      for (String line : skipped) System.out.println(line);
     }
   }
 
@@ -41,12 +51,37 @@ public class MidiOut {
       return;
     }
     currentIndex = (currentIndex + 1) % outputs.size();
-    connectTo(outputs.get(currentIndex));
+    MidiDevice.Info info = outputs.get(currentIndex);
+    connectTo(info);
+    System.out.println(String.format("Selected MIDI output %d/%d: %s", currentIndex + 1, outputs.size(), info.getName()));
   }
 
   // Human-readable current device name.
   public String getCurrentName() {
     return lastDeviceName;
+  }
+
+  public boolean isReady() {
+    return recv != null;
+  }
+
+  public boolean reconnect(String nameHint, boolean strict) {
+    close();
+    refreshOutputs();
+    connectPreferred(nameHint, strict);
+    return isReady();
+  }
+
+  public boolean connectFirstAvailable() {
+    close();
+    refreshOutputs();
+    if (outputs.isEmpty()) {
+      System.out.println("No openable MIDI outputs found.");
+      return false;
+    }
+    currentIndex = 0;
+    connectTo(outputs.get(currentIndex));
+    return isReady();
   }
 
   public void noteOn(int note, int vel) { send(ShortMessage.NOTE_ON,  note & 0x7F, vel & 0x7F); }
@@ -60,6 +95,7 @@ public class MidiOut {
     recv = null;
     device = null;
     lastDeviceName = "(none)";
+    activeOutputInfo = null;
   }
 
   // ---------- Internal helpers ----------
@@ -80,12 +116,79 @@ public class MidiOut {
     // and closing new virtual ports mid-session.
     outputs.clear();
     for (MidiDevice.Info info : MidiSystem.getMidiDeviceInfo()) {
+      if (probeOutput(info).available) outputs.add(info);
+    }
+  }
+
+  private static OutputProbe probeOutput(MidiDevice.Info info) {
+    try {
+      if (sameInfo(info, activeOutputInfo)) {
+        return new OutputProbe(true, true, "");
+      }
+
+      MidiDevice dev = MidiSystem.getMidiDevice(info);
+      int maxReceivers = dev.getMaxReceivers();
+      if (maxReceivers == 0) {
+        return new OutputProbe(false, false, "does not accept receivers");
+      }
+      if (isJavaInternalEndpoint(info)) {
+        return new OutputProbe(false, true, "Java Sound internal endpoint, not a routable MIDI port");
+      }
+
+      // If this sketch already has the endpoint open, it is a real usable output.
+      // Do not request another Receiver because some devices expose only one.
+      boolean wasOpen = dev.isOpen();
+      if (wasOpen) {
+        return new OutputProbe(true, true, "");
+      }
+
+      Receiver testReceiver = null;
       try {
-        MidiDevice dev = MidiSystem.getMidiDevice(info);
-        if (dev.getMaxReceivers() != 0) {
-          outputs.add(info);
-        }
-      } catch (Exception ignore) {}
+        dev.open();
+        testReceiver = dev.getReceiver();
+        return new OutputProbe(true, true, "");
+      } catch (Exception e) {
+        return new OutputProbe(false, true, friendlyError(e));
+      } finally {
+        try { if (testReceiver != null) testReceiver.close(); } catch (Exception ignore) {}
+        try { if (dev.isOpen()) dev.close(); } catch (Exception ignore) {}
+      }
+    } catch (Exception e) {
+      return new OutputProbe(false, true, friendlyError(e));
+    }
+  }
+
+  private static String friendlyError(Exception e) {
+    String msg = e.getMessage();
+    if (msg == null || msg.trim().length() == 0) return e.getClass().getSimpleName();
+    return e.getClass().getSimpleName() + ": " + msg;
+  }
+
+  private static boolean sameInfo(MidiDevice.Info a, MidiDevice.Info b) {
+    if (a == null || b == null) return false;
+    return a.getName().equals(b.getName())
+      && a.getDescription().equals(b.getDescription())
+      && a.getVendor().equals(b.getVendor())
+      && a.getVersion().equals(b.getVersion());
+  }
+
+  private static boolean isJavaInternalEndpoint(MidiDevice.Info info) {
+    String hay = (info.getName() + " " + info.getDescription() + " " + info.getVendor()).toLowerCase();
+    return hay.contains("gervill")
+      || hay.contains("real time sequencer")
+      || hay.contains("java sound")
+      || (hay.contains("software midi synthesizer") && (hay.contains("openjdk") || hay.contains("oracle")));
+  }
+
+  private static class OutputProbe {
+    boolean available;
+    boolean outputCandidate;
+    String reason;
+
+    OutputProbe(boolean available, boolean outputCandidate, String reason) {
+      this.available = available;
+      this.outputCandidate = outputCandidate;
+      this.reason = reason;
     }
   }
 
@@ -131,6 +234,7 @@ public class MidiOut {
       recv = dev.getReceiver();
       device = dev;
       lastDeviceName = info.getName();
+      activeOutputInfo = info;
       System.out.println("MIDI -> " + lastDeviceName);
     } catch (Exception e) {
       System.out.println("Failed to open MIDI device: " + e);

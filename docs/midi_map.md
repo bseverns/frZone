@@ -14,6 +14,8 @@ Default per‑band notes (General MIDI‑ish drums; channel 1 by default). You c
 
 **CCs for visuals** (default): 20–24, one per band. Adjust with **c/C**.
 
+Press **G** to send a MIDI hello: each active CC lane pulses low/high/low, and note taps are included when `MIDI_SEND_NOTES` is enabled. This is the quickest route check for visual apps that listen blindly.
+
 ## Rig-tuned mode
 
 When `RIG_TUNED_MODE = true`, `frZone` stops behaving like an editable MIDI sketch and instead publishes the canonical `live-rig` analysis lane:
@@ -26,3 +28,5 @@ When `RIG_TUNED_MODE = true`, `frZone` stops behaving like an editable MIDI sket
 | `analysis.high_band`      | 4        |   15    | 24 |
 
 Raw band 1 (`200–800 Hz`) remains available for on-screen diagnostics and legacy `/bandEnergy` output, but it is intentionally omitted from the canonical analysis lane.
+
+Press **G** in rig-tuned mode to pulse the canonical CC lane on Ch 15 without changing or unlocking the committed mapping.
