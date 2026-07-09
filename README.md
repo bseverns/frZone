@@ -72,7 +72,7 @@ Press **d** to print outputs that are openable by the sketch and confirm the exa
 ## Repo layout
 * **processing/** — The core instrument. Crack open `FreqZone/FreqZone.pde` first to see how thresholds, hysteresis, and cooldowns are narrated in code while you test routing live.
 * **docs/** — Cheat sheets for getting moving fast. Start with `docs/quickstart.md`, then `docs/osc_addresses.md` so you can wire OSC without guessing.
-* **examples/** — Quick probes to prove the pipes work. Run `examples/osc_listener.py` to sanity‑check OSC output before students start improvising.
+* **examples/** — Quick probes to prove the pipes work. Run `examples/osc/python_receiver.py` to sanity‑check OSC output before students start improvising.
 * **assignments/** — Guided labs that keep the teaching flow honest. Use them to stage short feedback loops while everyone experiments.
 * **atlas/** + **interop/** — The sibling-repo contract surface for rig-tuned mode.
 

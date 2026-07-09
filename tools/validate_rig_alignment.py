@@ -21,6 +21,12 @@ EXPECTED_ANALYSIS_IDS = [
     "analysis.upper_mid_band",
     "analysis.high_band",
 ]
+EXPECTED_ANALYSIS_WEIGHT_KEYS = [
+    "low_band",
+    "mid_band",
+    "upper_mid_band",
+    "high_band",
+]
 EXPECTED_BINDINGS = [
     ("analysis.low_band", 0, 20, "/analysis/low_band"),
     ("analysis.mid_band", 2, 22, "/analysis/mid_band"),
@@ -45,6 +51,88 @@ def get_repo_registry_entry(snapshot: dict[str, Any], repo_id: str) -> dict[str,
     return None
 
 
+def validate_legacy_snapshot(snapshot: dict[str, Any], mirror: Path, errors: list[str], checks: list[str]) -> None:
+    analysis_catalog = snapshot.get("semanticCatalog", {}).get("analysis", [])
+    analysis_ids = [entry.get("id") for entry in analysis_catalog if isinstance(entry, dict)]
+    if analysis_ids != EXPECTED_ANALYSIS_IDS:
+        errors.append(f"{mirror}: semanticCatalog.analysis is {analysis_ids!r}, expected {EXPECTED_ANALYSIS_IDS!r}")
+    else:
+        checks.append(f"{mirror}: semantic analysis catalog matches canonical live-rig IDs")
+
+    frzone_entry = get_repo_registry_entry(snapshot, "frZone")
+    if frzone_entry is None:
+        errors.append(f"{mirror}: missing repoRegistry entry for 'frZone'")
+    else:
+        if frzone_entry.get("role") != "analysis":
+            errors.append(f"{mirror}: frZone role is {frzone_entry.get('role')!r}, expected 'analysis'")
+        else:
+            checks.append(f"{mirror}: frZone is registered as the analysis repo")
+
+
+def optional_devices(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    devices: list[dict[str, Any]] = []
+    for source in (snapshot.get("profile", {}), snapshot):
+        for entry in source.get("optional_devices", []):
+            if isinstance(entry, dict):
+                devices.append(entry)
+    return devices
+
+
+def find_optional_device(snapshot: dict[str, Any], device_id: str) -> dict[str, Any] | None:
+    for entry in optional_devices(snapshot):
+        if entry.get("id") == device_id:
+            return entry
+    return None
+
+
+def validate_current_snapshot(snapshot: dict[str, Any], mirror: Path, errors: list[str], checks: list[str]) -> None:
+    if snapshot.get("export_version") != "1.0.0":
+        errors.append(f"{mirror}: export_version is {snapshot.get('export_version')!r}, expected '1.0.0'")
+    else:
+        checks.append(f"{mirror}: current live-rig export shape detected")
+
+    profile = snapshot.get("profile", {})
+    if profile.get("profile_id") != "profile.minimal":
+        errors.append(f"{mirror}: profile.profile_id is {profile.get('profile_id')!r}, expected 'profile.minimal'")
+
+    frzone_entry = find_optional_device(snapshot, "analysis.frzone")
+    if frzone_entry is None:
+        errors.append(f"{mirror}: missing optional analysis device 'analysis.frzone'")
+    elif frzone_entry.get("role") != "analysis":
+        errors.append(f"{mirror}: analysis.frzone role is {frzone_entry.get('role')!r}, expected 'analysis'")
+    else:
+        checks.append(f"{mirror}: frZone is registered as an optional analysis device")
+
+    scene_like_entries = [
+        entry for entry in snapshot.get("scenes", []) + snapshot.get("states", [])
+        if isinstance(entry, dict)
+    ]
+    if not scene_like_entries:
+        errors.append(f"{mirror}: no scenes/states found to validate analysis weights")
+        return
+
+    bad_weights: list[str] = []
+    for entry in scene_like_entries:
+        weights = entry.get("analysis", {}).get("weights", {})
+        weight_keys = list(weights.keys()) if isinstance(weights, dict) else []
+        if weight_keys != EXPECTED_ANALYSIS_WEIGHT_KEYS:
+            bad_weights.append(f"{entry.get('id', '(unknown)')}: {weight_keys!r}")
+
+    if bad_weights:
+        errors.append(f"{mirror}: analysis weight keys differ from canonical bands: {bad_weights}")
+    else:
+        checks.append(f"{mirror}: scenes/states use canonical analysis weight keys {EXPECTED_ANALYSIS_WEIGHT_KEYS!r}")
+
+
+def validate_snapshot(snapshot: dict[str, Any], mirror: Path, errors: list[str], checks: list[str]) -> None:
+    if "export_version" in snapshot:
+        validate_current_snapshot(snapshot, mirror, errors, checks)
+    elif "semanticCatalog" in snapshot or "repoRegistry" in snapshot:
+        validate_legacy_snapshot(snapshot, mirror, errors, checks)
+    else:
+        errors.append(f"{mirror}: unrecognized live-rig export shape")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate frZone's rig-tuned alignment against the committed live-rig snapshot mirror.")
     parser.add_argument("--mirror", type=Path, default=DEFAULT_MIRROR, help="Path to the committed local live-rig snapshot mirror.")
@@ -64,21 +152,7 @@ def main() -> int:
     elif sibling is not None:
         checks.append(f"{args.mirror}: committed mirror matches sibling authority snapshot")
 
-    analysis_catalog = snapshot.get("semanticCatalog", {}).get("analysis", [])
-    analysis_ids = [entry.get("id") for entry in analysis_catalog if isinstance(entry, dict)]
-    if analysis_ids != EXPECTED_ANALYSIS_IDS:
-        errors.append(f"{args.mirror}: semanticCatalog.analysis is {analysis_ids!r}, expected {EXPECTED_ANALYSIS_IDS!r}")
-    else:
-        checks.append(f"{args.mirror}: semantic analysis catalog matches canonical live-rig IDs")
-
-    frzone_entry = get_repo_registry_entry(snapshot, "frZone")
-    if frzone_entry is None:
-        errors.append(f"{args.mirror}: missing repoRegistry entry for 'frZone'")
-    else:
-        if frzone_entry.get("role") != "analysis":
-            errors.append(f"{args.mirror}: frZone role is {frzone_entry.get('role')!r}, expected 'analysis'")
-        else:
-            checks.append(f"{args.mirror}: frZone is registered as the analysis repo")
+    validate_snapshot(snapshot, args.mirror, errors, checks)
 
     if profile.get("profile") != "frzone":
         errors.append(f"{args.profile}: profile is {profile.get('profile')!r}, expected 'frzone'")
