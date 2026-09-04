@@ -71,6 +71,7 @@ Press **d** to print outputs that are openable by the sketch and confirm the exa
 
 ## Repo layout
 * **processing/** — The core instrument. Crack open `FreqZone/FreqZone.pde` first to see how thresholds, hysteresis, and cooldowns are narrated in code while you test routing live.
+* **firmware/** — Incremental Raspberry Pi Pico WH physical control-surface prototype. Stage 1 reads one muxed potentiometer and one button over USB serial.
 * **docs/** — Cheat sheets for getting moving fast. Start with `docs/quickstart.md`, then `docs/osc_addresses.md` so you can wire OSC without guessing.
 * **examples/** — Quick probes to prove the pipes work. Run `examples/osc/python_receiver.py` to sanity‑check OSC output before students start improvising.
 * **assignments/** — Guided labs that keep the teaching flow honest. Use them to stage short feedback loops while everyone experiments.

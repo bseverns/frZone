@@ -1,6 +1,7 @@
 .DS_Store
 .idea/
 .vscode/
+.pio/
 *.zip
 processing/FreqZoneTriggers/data/*.wav
 processing/FreqZoneTriggers/data/*.mp3
