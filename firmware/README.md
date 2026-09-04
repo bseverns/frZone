@@ -1,16 +1,16 @@
 # frZone physical control surface firmware
 
 This directory contains the incremental Raspberry Pi Pico WH control-surface
-prototype. Stage 2:
+prototype. Stage 3:
 
 - scans potentiometers `A0..A7` through channels `C0..C7` of a CD74HC4067;
 - reads primary buttons `B0..B3` and `SHIFT` from direct GPIO pins; and
-- emits normalized `0..65535` control events over USB serial.
+- emits normalized `0..65535` diagnostic events over USB serial; and
+- translates those same events to USB MIDI on channel 16.
 
-USB MIDI, Wi-Fi OSC, LEDs, mappings, and frZone integration remain later
-stages.
+Wi-Fi OSC, LEDs, semantic mappings, and frZone integration remain later stages.
 
-## Stage 2 wiring
+## Stage 3 wiring
 
 Use only 3.3 V for the potentiometer and multiplexer signal path.
 
@@ -48,6 +48,22 @@ or above a 10-count ADC deadband. The first real reading seeds each filter.
 All five buttons are sampled on each loop pass. A transition is emitted only
 after the raw input remains unchanged for 20 ms.
 
+The scanner produces transport-neutral `ControlEvent` values. The USB MIDI
+transport quantizes analog values to 7 bits and suppresses repeated CC values;
+serial diagnostics retain the full 16-bit normalized values.
+
+## USB MIDI wire map
+
+All surface messages use MIDI channel 16, keeping them separate from frZone's
+channel 15 analysis output. This is a wire protocol only; the host will assign
+semantic meanings in a later slice.
+
+| Physical control | USB MIDI message |
+| --- | --- |
+| `A0..A7` | CC `16..23`, value `0..127` |
+| `B0..B3` | Notes `36..39`, velocity 127 on press, Note Off on release |
+| `SHIFT` | Note `40`, velocity 127 on press, Note Off on release |
+
 ## Build and monitor
 
 From the repository root:
@@ -60,7 +76,7 @@ pio device monitor -d firmware
 Expected output resembles:
 
 ```text
-frzone-surface stage=2 controls=A0-A7,B0-B3,SHIFT adc_bits=12
+frzone-surface stage=3 controls=A0-A7,B0-B3,SHIFT adc_bits=12 midi_ch=16 cc=16-23 notes=36-40
 event t_ms=21 id=A0 type=value value=32631 normalized=0.4979
 event t_ms=29 id=A7 type=value value=65535 normalized=1.0000
 event t_ms=1840 id=B2 type=pressed value=65535 normalized=1.0000
@@ -76,6 +92,11 @@ event t_ms=2012 id=B2 type=released value=0 normalized=0.0000
 - Every button produces exactly one `pressed` and one `released` event.
 - Holding two buttons produces independent events for both controls.
 - Firmware begins scanning when no serial monitor is attached.
+- The Pico enumerates as a USB MIDI device as well as a serial device.
+- `A0..A7` produce only CC `16..23` on channel 16 and reach values 0 and 127.
+- `B0..B3` and `SHIFT` produce Note On `36..40` and matching Note Off events.
+- An untouched pot produces no repeated MIDI CC messages after settling.
+- MIDI resumes after unplugging and reconnecting the USB cable.
 
 Record which channel exhibits any idle chatter or cross-talk before changing
 the shared deadband, filter constant, or mux settling delay.

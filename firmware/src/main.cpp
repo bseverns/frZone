@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <MIDIUSB.h>
 
 #include <array>
 #include <cstdint>
@@ -21,6 +22,12 @@ constexpr uint16_t kAnalogDeadband = 10;
 constexpr uint32_t kAnalogScanIntervalUs = 1000;
 constexpr uint32_t kMuxSettleUs = 5;
 constexpr uint32_t kDebounceMs = 20;
+
+// Human-readable MIDI channel 16 is encoded as channel index 15 on the wire.
+constexpr uint8_t kMidiChannel = 15;
+constexpr uint8_t kAnalogCcBase = 16;
+constexpr uint8_t kButtonNoteBase = 36;
+constexpr uint8_t kMidiValueMaximum = 127;
 
 enum class EventType : uint8_t {
   ValueChanged,
@@ -69,6 +76,8 @@ struct ButtonState {
 
 std::array<AnalogState, kAnalogControlCount> analogStates;
 std::array<ButtonState, kButtonControlCount> buttonStates;
+std::array<uint8_t, kAnalogControlCount> lastMidiValues;
+std::array<bool, kAnalogControlCount> midiValuesInitialized;
 uint8_t currentAnalogIndex = 0;
 uint32_t lastAnalogScanUs = 0;
 
@@ -97,7 +106,51 @@ const char* eventName(EventType type) {
   return "unknown";
 }
 
-void emitControlEvent(const ControlEvent& event) {
+uint8_t toMidiValue(uint16_t normalizedValue) {
+  return static_cast<uint8_t>(
+      (static_cast<uint32_t>(normalizedValue) * kMidiValueMaximum + 32767UL) /
+      65535UL);
+}
+
+void sendMidiPacket(uint8_t codeIndexNumber, uint8_t status, uint8_t data1,
+                    uint8_t data2) {
+  const midiEventPacket_t packet = {codeIndexNumber, status, data1, data2};
+  MidiUSB.sendMIDI(packet);
+  MidiUSB.flush();
+}
+
+void emitUsbMidiEvent(const ControlEvent& event) {
+  const uint8_t index = static_cast<uint8_t>(event.controlId);
+
+  if (event.type == EventType::ValueChanged &&
+      index < kAnalogControlCount) {
+    const uint8_t value = toMidiValue(event.value);
+    if (midiValuesInitialized[index] && lastMidiValues[index] == value) {
+      return;
+    }
+
+    midiValuesInitialized[index] = true;
+    lastMidiValues[index] = value;
+    sendMidiPacket(0x0B, static_cast<uint8_t>(0xB0U | kMidiChannel),
+                   static_cast<uint8_t>(kAnalogCcBase + index), value);
+    return;
+  }
+
+  if (index < kAnalogControlCount || index >= kControlCount) {
+    return;
+  }
+
+  const uint8_t note = static_cast<uint8_t>(
+      kButtonNoteBase + (index - kAnalogControlCount));
+  if (event.type == EventType::Pressed) {
+    sendMidiPacket(0x09, static_cast<uint8_t>(0x90U | kMidiChannel), note,
+                   kMidiValueMaximum);
+  } else if (event.type == EventType::Released) {
+    sendMidiPacket(0x08, static_cast<uint8_t>(0x80U | kMidiChannel), note, 0);
+  }
+}
+
+void emitSerialEvent(const ControlEvent& event) {
   const float normalized = static_cast<float>(event.value) / 65535.0f;
   Serial.print("event t_ms=");
   Serial.print(event.timestampMs);
@@ -109,6 +162,11 @@ void emitControlEvent(const ControlEvent& event) {
   Serial.print(event.value);
   Serial.print(" normalized=");
   Serial.println(normalized, 4);
+}
+
+void emitControlEvent(const ControlEvent& event) {
+  emitUsbMidiEvent(event);
+  emitSerialEvent(event);
 }
 
 void selectMuxChannel(uint8_t channel) {
@@ -200,11 +258,16 @@ static_assert(kControlNames.size() == kControlCount,
               "Every physical control needs a stable event name");
 static_assert(kButtonPins.size() == kButtonControlCount,
               "Every button needs a GPIO pin");
+static_assert(kAnalogCcBase + kAnalogControlCount - 1 <= 127,
+              "Analog CC numbers must fit in a MIDI data byte");
+static_assert(kButtonNoteBase + kButtonControlCount - 1 <= 127,
+              "Button note numbers must fit in a MIDI data byte");
 
 }  // namespace
 
 void setup() {
   Serial.begin(115200);
+  MidiUSB.begin();
 
   for (uint8_t pin : kMuxSelectPins) {
     pinMode(pin, OUTPUT);
@@ -225,7 +288,8 @@ void setup() {
   // Do not wait for a serial monitor: the physical scan must always start.
   delay(20);
   Serial.println(
-      "frzone-surface stage=2 controls=A0-A7,B0-B3,SHIFT adc_bits=12");
+      "frzone-surface stage=3 controls=A0-A7,B0-B3,SHIFT adc_bits=12 "
+      "midi_ch=16 cc=16-23 notes=36-40");
 }
 
 void loop() {

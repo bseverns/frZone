@@ -1,5 +1,20 @@
 # MIDI Map
 
+## Physical control surface wire protocol
+
+The Stage 3 Pico WH firmware emits physical events on channel 16. These
+assignments describe the stable device-to-host wire protocol, not what a
+control means inside frZone; semantic mapping remains host-side.
+
+| Physical control | MIDI Ch | Message |
+| --- | :---: | --- |
+| `A0..A7` | 16 | CC `16..23`, value `0..127` |
+| `B0..B3` | 16 | Note `36..39`, velocity 127 on press, Note Off on release |
+| `SHIFT` | 16 | Note `40`, velocity 127 on press, Note Off on release |
+
+Channel 16 separates surface input from the rig-tuned frZone analysis output
+on channel 15.
+
 ## Generic classroom mode
 
 Default per‑band notes (General MIDI‑ish drums; channel 1 by default). You can change them live with **- / =**.
