@@ -5,10 +5,14 @@
 
 namespace {
 
+constexpr uint8_t kAnalogControlCount = 8;
+constexpr uint8_t kButtonControlCount = 5;
+constexpr uint8_t kControlCount = kAnalogControlCount + kButtonControlCount;
+
 constexpr std::array<uint8_t, 4> kMuxSelectPins = {2, 3, 4, 5};
 constexpr uint8_t kMuxAnalogPin = 26;  // GP26 / ADC0 / physical pin 31
-constexpr uint8_t kButtonPin = 6;      // GP6 / physical pin 9, active low
-constexpr uint8_t kMuxChannel = 0;
+constexpr std::array<uint8_t, kButtonControlCount> kButtonPins = {
+    6, 7, 8, 9, 10};  // B0..B3, then SHIFT; all active low
 
 constexpr uint16_t kAdcMaximum = 4095;
 constexpr uint8_t kAverageSamples = 4;
@@ -26,8 +30,23 @@ enum class EventType : uint8_t {
 
 enum class ControlId : uint8_t {
   A0 = 0,
-  B0 = 8,
+  A1,
+  A2,
+  A3,
+  A4,
+  A5,
+  A6,
+  A7,
+  B0,
+  B1,
+  B2,
+  B3,
+  Shift,
 };
+
+constexpr std::array<const char*, kControlCount> kControlNames = {
+    "A0", "A1", "A2", "A3", "A4", "A5", "A6",
+    "A7", "B0", "B1", "B2", "B3", "SHIFT"};
 
 struct ControlEvent {
   ControlId controlId;
@@ -36,23 +55,34 @@ struct ControlEvent {
   uint32_t timestampMs;
 };
 
-bool analogInitialized = false;
-float filteredAnalog = 0.0f;
-uint16_t lastReportedAnalog = 0;
+struct AnalogState {
+  bool initialized = false;
+  float filtered = 0.0f;
+  uint16_t lastReported = 0;
+};
+
+struct ButtonState {
+  bool stablePressed = false;
+  bool lastRawPressed = false;
+  uint32_t lastTransitionMs = 0;
+};
+
+std::array<AnalogState, kAnalogControlCount> analogStates;
+std::array<ButtonState, kButtonControlCount> buttonStates;
+uint8_t currentAnalogIndex = 0;
 uint32_t lastAnalogScanUs = 0;
 
-bool stableButtonPressed = false;
-bool lastRawButtonPressed = false;
-uint32_t lastButtonTransitionMs = 0;
+ControlId analogControlId(uint8_t index) {
+  return static_cast<ControlId>(index);
+}
+
+ControlId buttonControlId(uint8_t index) {
+  return static_cast<ControlId>(kAnalogControlCount + index);
+}
 
 const char* controlName(ControlId id) {
-  switch (id) {
-    case ControlId::A0:
-      return "A0";
-    case ControlId::B0:
-      return "B0";
-  }
-  return "?";
+  const uint8_t index = static_cast<uint8_t>(id);
+  return index < kControlNames.size() ? kControlNames[index] : "?";
 }
 
 const char* eventName(EventType type) {
@@ -87,11 +117,12 @@ void selectMuxChannel(uint8_t channel) {
   }
 }
 
-uint16_t readMuxAnalog() {
-  selectMuxChannel(kMuxChannel);
+uint16_t readMuxAnalog(uint8_t channel) {
+  selectMuxChannel(channel);
   delayMicroseconds(kMuxSettleUs);
 
-  // The first conversion after a mux change lets the ADC sample-and-hold settle.
+  // Discard the first conversion after changing channels so the ADC
+  // sample-and-hold does not carry charge from the previous potentiometer.
   (void)analogRead(kMuxAnalogPin);
 
   uint32_t sum = 0;
@@ -107,56 +138,68 @@ uint16_t normalizeAnalog(uint16_t raw) {
                                kAdcMaximum);
 }
 
-void scanAnalog(uint32_t nowUs, uint32_t nowMs) {
+void scanNextAnalog(uint32_t nowUs, uint32_t nowMs) {
   if (static_cast<uint32_t>(nowUs - lastAnalogScanUs) <
       kAnalogScanIntervalUs) {
     return;
   }
   lastAnalogScanUs = nowUs;
 
-  const uint16_t raw = readMuxAnalog();
-  if (!analogInitialized) {
-    filteredAnalog = static_cast<float>(raw);
-    lastReportedAnalog = raw;
-    analogInitialized = true;
-    emitControlEvent({ControlId::A0, EventType::ValueChanged,
+  const uint8_t index = currentAnalogIndex;
+  AnalogState& state = analogStates[index];
+  const uint16_t raw = readMuxAnalog(index);
+
+  if (!state.initialized) {
+    state.filtered = static_cast<float>(raw);
+    state.lastReported = raw;
+    state.initialized = true;
+    emitControlEvent({analogControlId(index), EventType::ValueChanged,
                       normalizeAnalog(raw), nowMs});
-    return;
+  } else {
+    state.filtered +=
+        kFilterAlpha * (static_cast<float>(raw) - state.filtered);
+    const uint16_t filtered = static_cast<uint16_t>(state.filtered + 0.5f);
+    const uint16_t delta = filtered > state.lastReported
+                               ? filtered - state.lastReported
+                               : state.lastReported - filtered;
+    if (delta >= kAnalogDeadband) {
+      state.lastReported = filtered;
+      emitControlEvent({analogControlId(index), EventType::ValueChanged,
+                        normalizeAnalog(filtered), nowMs});
+    }
   }
 
-  filteredAnalog += kFilterAlpha * (static_cast<float>(raw) - filteredAnalog);
-  const uint16_t filtered = static_cast<uint16_t>(filteredAnalog + 0.5f);
-  const uint16_t delta = filtered > lastReportedAnalog
-                             ? filtered - lastReportedAnalog
-                             : lastReportedAnalog - filtered;
-  if (delta < kAnalogDeadband) {
-    return;
-  }
-
-  lastReportedAnalog = filtered;
-  emitControlEvent({ControlId::A0, EventType::ValueChanged,
-                    normalizeAnalog(filtered), nowMs});
+  currentAnalogIndex =
+      static_cast<uint8_t>((currentAnalogIndex + 1) % kAnalogControlCount);
 }
 
-void scanButton(uint32_t nowMs) {
-  const bool rawPressed = digitalRead(kButtonPin) == LOW;
-  if (rawPressed != lastRawButtonPressed) {
-    lastRawButtonPressed = rawPressed;
-    lastButtonTransitionMs = nowMs;
-  }
+void scanButtons(uint32_t nowMs) {
+  for (uint8_t index = 0; index < kButtonControlCount; ++index) {
+    ButtonState& state = buttonStates[index];
+    const bool rawPressed = digitalRead(kButtonPins[index]) == LOW;
 
-  if (rawPressed == stableButtonPressed ||
-      static_cast<uint32_t>(nowMs - lastButtonTransitionMs) < kDebounceMs) {
-    return;
-  }
+    if (rawPressed != state.lastRawPressed) {
+      state.lastRawPressed = rawPressed;
+      state.lastTransitionMs = nowMs;
+    }
 
-  stableButtonPressed = rawPressed;
-  emitControlEvent({ControlId::B0,
-                    stableButtonPressed ? EventType::Pressed
-                                        : EventType::Released,
-                    static_cast<uint16_t>(stableButtonPressed ? 65535U : 0U),
-                    nowMs});
+    if (rawPressed == state.stablePressed ||
+        static_cast<uint32_t>(nowMs - state.lastTransitionMs) < kDebounceMs) {
+      continue;
+    }
+
+    state.stablePressed = rawPressed;
+    emitControlEvent(
+        {buttonControlId(index),
+         state.stablePressed ? EventType::Pressed : EventType::Released,
+         static_cast<uint16_t>(state.stablePressed ? 65535U : 0U), nowMs});
+  }
 }
+
+static_assert(kControlNames.size() == kControlCount,
+              "Every physical control needs a stable event name");
+static_assert(kButtonPins.size() == kButtonControlCount,
+              "Every button needs a GPIO pin");
 
 }  // namespace
 
@@ -168,21 +211,26 @@ void setup() {
     digitalWrite(pin, LOW);
   }
   pinMode(kMuxAnalogPin, INPUT);
-  pinMode(kButtonPin, INPUT_PULLUP);
   analogReadResolution(12);
 
-  stableButtonPressed = digitalRead(kButtonPin) == LOW;
-  lastRawButtonPressed = stableButtonPressed;
-  lastButtonTransitionMs = millis();
+  const uint32_t nowMs = millis();
+  for (uint8_t index = 0; index < kButtonControlCount; ++index) {
+    pinMode(kButtonPins[index], INPUT_PULLUP);
+    const bool pressed = digitalRead(kButtonPins[index]) == LOW;
+    buttonStates[index].stablePressed = pressed;
+    buttonStates[index].lastRawPressed = pressed;
+    buttonStates[index].lastTransitionMs = nowMs;
+  }
 
   // Do not wait for a serial monitor: the physical scan must always start.
   delay(20);
-  Serial.println("frzone-surface stage=1 controls=A0,B0 adc_bits=12");
+  Serial.println(
+      "frzone-surface stage=2 controls=A0-A7,B0-B3,SHIFT adc_bits=12");
 }
 
 void loop() {
   const uint32_t nowUs = micros();
   const uint32_t nowMs = millis();
-  scanAnalog(nowUs, nowMs);
-  scanButton(nowMs);
+  scanNextAnalog(nowUs, nowMs);
+  scanButtons(nowMs);
 }
