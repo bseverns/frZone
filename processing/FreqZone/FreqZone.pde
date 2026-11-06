@@ -30,6 +30,7 @@ import netP5.*;
 import javax.sound.midi.*;
 import java.util.*;
 import processing.data.*;
+import processing.event.MouseEvent;
 import java.io.*;
 
 // ======================= CONFIG =========================
@@ -49,6 +50,13 @@ boolean RIG_TUNED_MODE = false;          // false = classroom/generic, true = li
 // Treat this like a lab knob: have students sketch their target spectrum, then
 // set these cut points and listen for what actually happens.
 float[] BAND_BOUNDS = { 0, 200, 800, 3000, 8000, 20000 };
+// Legacy mode retains these contiguous defaults. Flexible mode lets the same
+// five listeners overlap or leave gaps; it is never available in rig mode.
+boolean FLEXIBLE_ZONE_MODE = false;
+String  ZONE_STATE_FILE = "zones.json";
+boolean LOG_SPECTRUM = false; // legacy linear view remains the default comparison.
+float DISPLAY_MIN_HZ = 20;
+float DISPLAY_MAX_HZ = 0; // 0 means current Nyquist; viewport never changes analysis.
 
 // --- Initial band configs (threshold, hysteresis, cooldown, MIDI note)
 // These arrays are intentionally imperfect so folks can hear the difference after
@@ -164,33 +172,19 @@ SemanticBandBinding[] rigSemanticBands = new SemanticBandBinding[0];
 // per-band trigger state
 // Think of BandTrigger as the worksheet for each frequency slice—every concept
 // we demo (threshold, hysteresis, cooldown) lives here with the running history.
-class BandTrigger {
+class BandTrigger extends ZoneMath.Zone {
   int idx;
-  float fLo, fHi;
-  float threshold;
-  float hysteresis;
-  int   cooldownMs;
-  long  lastTrigMs;
-  boolean armed;
-  int   midiNote;
-  float smooth;        // smoothed normalized energy 0..1
 
   BandTrigger(int idx, float fLo, float fHi, float thr, float hyst, int cdMs, int note) {
+    super("zone-" + (idx + 1), "Zone " + (idx + 1), fLo, fHi, thr, hyst, cdMs, note);
     this.idx = idx;
-    this.fLo = fLo;
-    this.fHi = fHi;
-    this.threshold = thr;
-    this.hysteresis = hyst;
-    this.cooldownMs = cdMs;
-    this.lastTrigMs = -999999;
-    this.armed = true;
-    this.midiNote = note;
-    this.smooth = 0;
   }
 }
 
 BandTrigger[] bands;
+float[] energies;
 int selectedBand = 0;
+int zoneDragEdge = 0; // -1 lower edge, 0 center, 1 upper edge
 
 // Calibration state
 boolean isCalibrating = false;
@@ -226,6 +220,7 @@ void setup() {
     int   note = MIDI_NOTES[min(i, MIDI_NOTES.length-1)];
     bands[i] = new BandTrigger(i, flo, fhi, thr, hy, cd, note);
   }
+  energies = new float[nBands];
 
   configureRuntimeMode();
 
@@ -254,33 +249,25 @@ void draw() {
   fft.forward(src.mix);
 
   float maxBar = 0;
-  float[] energies = new float[bands.length];
 
   boolean allowOutput = !(isCalibrating && SUPPRESS_TRIGGERS_WHILE_CAL);
 
   for (int b = 0; b < bands.length; b++) {
     BandTrigger bt = bands[b];
 
-    int iLo = fft.freqToIndex(bt.fLo);
-    int iHi = fft.freqToIndex(bt.fHi);
-    if (iHi < iLo) { int tmp = iHi; iHi = iLo; iLo = tmp; }
-
-    float sum = 0;
-    for (int i = iLo; i <= iHi; i++) {
-      sum += fft.getBand(i);
-    }
-    energies[b] = sum;
-    if (sum > maxBar) maxBar = sum;
+    float energy = measureZone(bt);
+    energies[b] = energy;
+    if (energy > maxBar) maxBar = energy;
 
     // Continuous energy: normalize around threshold and apply asymmetric smooth.
     // This leans on the current threshold so students immediately hear/see why
     // moving thresholds matters beyond "it triggers more".
-    float eNormTarget = constrain(map(sum, bt.threshold, bt.threshold * ENERGY_MAP_MAX_MULT, 0, 1), 0, 1);
+    float eNormTarget = constrain(map(energy, bt.threshold, bt.threshold * ENERGY_MAP_MAX_MULT, 0, 1), 0, 1);
     float smooth = bt.smooth;
     if (eNormTarget > smooth) {
-      smooth = lerp(smooth, eNormTarget, ENERGY_ATTACK);
+      smooth = lerp(smooth, eNormTarget, bt.attack);
     } else {
-      smooth = lerp(smooth, eNormTarget, ENERGY_RELEASE);
+      smooth = lerp(smooth, eNormTarget, bt.release);
     }
     bt.smooth = smooth;
 
@@ -311,18 +298,19 @@ void draw() {
     long now = millis();
 
     // Re-arm when energy falls sufficiently below threshold / hysteresis.
-    if (!bt.armed && sum < (bt.threshold / bt.hysteresis)) {
+    if (!bt.armed && energy < (bt.threshold / bt.hysteresis)) {
       bt.armed = true;
+      bt.calibrationInvalidated = false;
     }
 
     boolean cooled = (now - bt.lastTrigMs) >= bt.cooldownMs;
-    if (bt.armed && cooled && sum >= bt.threshold && outputsActive) {
+    if (bt.armed && cooled && energy >= bt.threshold && outputsActive) {
       // Fire! These eight lines are the heart of the lesson—walk through them
       // slowly and have learners narrate the state changes while you hold a note.
       bt.lastTrigMs = now;
       bt.armed = false;
 
-      if (OSC_ENABLED) sendOscTrigger(bt, sum);
+      if (OSC_ENABLED) sendOscTrigger(bt, energy);
 
       if (MIDI_ENABLED && MIDI_SEND_NOTES && midi != null) {
         float velNorm = pow(bt.smooth, VELOCITY_CURVE);
@@ -341,13 +329,87 @@ void draw() {
 
   processNoteOffs();
 
-  if (SHOW_SPECTRUM) drawSpectrum(fft);
+  if (SHOW_SPECTRUM) {
+    if (LOG_SPECTRUM) drawLogSpectrum(fft);
+    else drawSpectrum(fft);
+  }
   drawBandBars(energies, maxBar);
 
   drawOverlay();
 }
 
 // ---------- Visualization ----------
+
+float nyquistHz() {
+  return fft != null ? fft.indexToFreq(fft.specSize()-1) : 0;
+}
+
+float measureZone(BandTrigger bt) {
+  ZoneMath.Span span = ZoneMath.binSpan(bt.loHz, bt.hiHz, nyquistHz(), fft.specSize());
+  float total = 0;
+  for (int i = span.lo; i <= span.hi; i++) total += fft.getBand(i);
+  return FLEXIBLE_ZONE_MODE ? total / span.count() : total;
+}
+
+float displayMinHz() {
+  float nyquist = nyquistHz();
+  return constrain(DISPLAY_MIN_HZ, max(1, fft.indexToFreq(1)), max(1, nyquist - 1));
+}
+
+float displayMaxHz() {
+  float nyquist = nyquistHz();
+  float wanted = DISPLAY_MAX_HZ > 0 ? DISPLAY_MAX_HZ : nyquist;
+  return constrain(wanted, displayMinHz() + 1, nyquist);
+}
+
+float logX(float hz) {
+  float lo = displayMinHz();
+  float hi = displayMaxHz();
+  return map(log(max(hz, lo)), log(lo), log(hi), 0, width);
+}
+
+float xToHz(float x) {
+  float lo = displayMinHz();
+  float hi = displayMaxHz();
+  return exp(map(constrain(x, 0, width), 0, width, log(lo), log(hi)));
+}
+
+void drawLogSpectrum(FFT fft) {
+  int h = height/4;
+  int baselineY = max(30, height/2 - 95);
+  int top = baselineY - h/2;
+  int bottom = baselineY + h/2;
+  noStroke();
+  fill(22);
+  rect(0, top, width, h);
+
+  for (int b = 0; b < bands.length; b++) {
+    BandTrigger bt = bands[b];
+    float x1 = logX(bt.loHz);
+    float x2 = logX(bt.hiHz);
+    if (x2 < 0 || x1 > width) continue;
+    noStroke();
+    fill(b == selectedBand ? color(80, 180, 255, 62) : color(90, 200, 120, 36));
+    rect(max(0, x1), top, min(width, x2) - max(0, x1), h);
+    stroke(b == selectedBand ? color(160, 230, 255) : color(110, 220, 145));
+    line(x1, top, x1, bottom);
+    line(x2, top, x2, bottom);
+  }
+
+  stroke(190);
+  noFill();
+  beginShape();
+  for (int i = 1; i < fft.specSize(); i++) {
+    float hz = fft.indexToFreq(i);
+    if (hz < displayMinHz() || hz > displayMaxHz()) continue;
+    float y = bottom - constrain(sqrt(fft.getBand(i)), 0, 1) * h;
+    vertex(logX(hz), y);
+  }
+  endShape();
+  fill(180);
+  textAlign(LEFT, BOTTOM);
+  text("log spectrum " + nf(displayMinHz(), 0, 0) + "–" + nf(displayMaxHz(), 0, 0) + " Hz (Nyquist " + nf(nyquistHz(), 0, 0) + ")", 8, top - 4);
+}
 
 void drawSpectrum(FFT fft) {
   stroke(80);
@@ -361,20 +423,18 @@ void drawSpectrum(FFT fft) {
 
   int nBands = BAND_BOUNDS.length - 1;
   int[] bandHiIdx = new int[nBands];
-  for (int b = 0; b < nBands; b++) {
-    bandHiIdx[b] = fft.freqToIndex(BAND_BOUNDS[b+1]);
+  if (!FLEXIBLE_ZONE_MODE) {
+    for (int b = 0; b < nBands; b++) bandHiIdx[b] = fft.freqToIndex(BAND_BOUNDS[b+1]);
   }
   pushMatrix();
   translate(0, baselineY);
   beginShape();
   int currentBand = 0;
   for (int i = 0; i < fft.specSize(); i++) {
-    while (currentBand < nBands - 1 && i > bandHiIdx[currentBand]) {
-      currentBand++;
+    if (!FLEXIBLE_ZONE_MODE) {
+      while (currentBand < nBands - 1 && i > bandHiIdx[currentBand]) currentBand++;
     }
-
-    BandTrigger bt = bands[min(currentBand, bands.length - 1)];
-    float smoothValue = bt.smooth;
+    float smoothValue = FLEXIBLE_ZONE_MODE ? 0 : bands[min(currentBand, bands.length - 1)].smooth;
     float gamma = sqrt(fft.getBand(i)); // gentle gamma softens spikes for projectors
     float dynamicAmplitude = amplitude * constrain(gamma, 0, 1);
     float y = lerp(dynamicAmplitude, -dynamicAmplitude, smoothValue);
@@ -435,7 +495,7 @@ void drawOverlay() {
   String src = USE_LIVE ? "LIVE" : "FILE";
   String play = (!USE_LIVE && player != null && player.isPlaying()) ? "PLAY" : "PAUSE";
   text("Source: " + src + (USE_LIVE ? "" : "  " + play) +
-       "   Mode: " + runtimeModeLabel +
+       "   Mode: " + runtimeModeLabel + "/" + (FLEXIBLE_ZONE_MODE ? "FLEX-MEAN" : "LEGACY-SUM") +
        "   OSC: " + (OSC_ENABLED ? "ON" : "off") +
        "   MIDI: " + (MIDI_ENABLED ? "ON" : "off") +
        "   Solo: " + (SOLO_SELECTED_BAND ? "SELECTED" : "all") +
@@ -452,7 +512,7 @@ void drawOverlay() {
   int boxX = 10;
   int boxY = 32;
   int boxW = width - 20;
-  int boxH = 170;
+  int boxH = 206;
   noStroke();
   fill(0, 180);
   rect(boxX, boxY, boxW, boxH, 6);
@@ -461,7 +521,9 @@ void drawOverlay() {
   textAlign(LEFT, TOP);
   int y = boxY + 8;
   text("MIDI device: " + (midi != null ? midi.getCurrentName() : "(none)"), boxX + 10, y); y += 18;
-  text("Keyboard: 1/2 band  |  [/] threshold  |  ;/' hysteresis  |  ,/. cooldown  |  -/= note  |  c/C CC  |  t/T transpose  |  S/O save/load", boxX + 10, y); y += 18;
+  text("Keyboard: 1/2 select | [/] threshold | ;/' hysteresis | ,/. cooldown | z/x center | v/n width | a/A attack | w/W release", boxX + 10, y); y += 18;
+  text("Zones: F flexible/legacy | Y/U save/load zones.json; S/O keeps legacy mapping.json transport-only", boxX + 10, y); y += 18;
+  text("Mouse: drag selected zone center/edge in log view; wheel zooms display only; Q switches log/linear comparison", boxX + 10, y); y += 18;
   text("Toggles: L live/file  |  P play/pause file  |  SPACE OSC  |  M MIDI  |  H help", boxX + 10, y); y += 18;
   if (RIG_TUNED_MODE) {
     text("Rig mode: Ch 15 analysis lane via " + RIG_PROFILE_FILE + "  |  semantic CCs 20/22/23/24  |  raw band 2 is local-only", boxX + 10, y); y += 18;
@@ -731,6 +793,89 @@ void loadMapping(String fname) {
   }
 }
 
+// ---------- Flexible-zone state (separate from legacy transport mapping) ----------
+
+void setZoneBounds(BandTrigger bt, float loHz, float hiHz) {
+  ZoneMath.Bounds bounds = ZoneMath.clampBounds(loHz, hiHz, nyquistHz());
+  bt.loHz = bounds.loHz;
+  bt.hiHz = bounds.hiHz;
+  bt.resetAfterBoundsEdit();
+}
+
+void clampZonesToNyquist() {
+  if (bands == null || fft == null) return;
+  for (int i = 0; i < bands.length; i++) {
+    BandTrigger bt = bands[i];
+    ZoneMath.Bounds bounds = ZoneMath.clampBounds(bt.loHz, bt.hiHz, nyquistHz());
+    if (bounds.loHz != bt.loHz || bounds.hiHz != bt.hiHz) setZoneBounds(bt, bounds.loHz, bounds.hiHz);
+  }
+}
+
+void saveZoneState(String fname) {
+  if (RIG_TUNED_MODE || !FLEXIBLE_ZONE_MODE) {
+    println("Zone save is available only in flexible generic mode.");
+    return;
+  }
+  try {
+    JSONObject root = new JSONObject();
+    root.setInt("version", 1);
+    root.setString("measurement", "mean");
+    JSONArray zones = new JSONArray();
+    for (int i = 0; i < bands.length; i++) {
+      BandTrigger bt = bands[i];
+      JSONObject zone = new JSONObject();
+      zone.setString("id", bt.id);
+      zone.setString("label", bt.label);
+      zone.setFloat("loHz", bt.loHz);
+      zone.setFloat("hiHz", bt.hiHz);
+      zone.setFloat("threshold", bt.threshold);
+      zone.setFloat("hysteresis", bt.hysteresis);
+      zone.setInt("cooldownMs", bt.cooldownMs);
+      zone.setFloat("attack", bt.attack);
+      zone.setFloat("release", bt.release);
+      zone.setInt("midiNote", clamp127(bt.midiNote));
+      zone.setInt("cc", clamp127(MIDI_CCS[min(i, MIDI_CCS.length-1)]));
+      zones.setJSONObject(i, zone);
+    }
+    root.setJSONArray("zones", zones);
+    saveJSONObject(root, dataPath(fname));
+    println("Saved flexible zones -> " + dataPath(fname));
+  } catch (Exception e) {
+    println("Save zones error: " + e);
+  }
+}
+
+void loadZoneState(String fname) {
+  if (RIG_TUNED_MODE) { println("Rig-tuned mode: flexible zones are disabled."); return; }
+  try {
+    String path = dataPath(fname);
+    File f = new File(path);
+    if (!f.exists()) { println("No flexible zone file at " + path); return; }
+    JSONObject root = loadJSONObject(path);
+    if (root.getInt("version") != 1 || !root.hasKey("zones")) throw new Exception("unsupported or incomplete zone state");
+    JSONArray zones = root.getJSONArray("zones");
+    if (zones.size() != bands.length) throw new Exception("expected " + bands.length + " zones, found " + zones.size());
+    for (int i = 0; i < bands.length; i++) {
+      JSONObject zone = zones.getJSONObject(i);
+      if (!zone.hasKey("id") || !zone.getString("id").equals(bands[i].id) || !zone.hasKey("loHz") || !zone.hasKey("hiHz")) throw new Exception("zone " + i + " has invalid identity or frequency bounds");
+      BandTrigger bt = bands[i];
+      bt.label = zone.hasKey("label") ? zone.getString("label") : bt.label;
+      bt.threshold = max(0.0001f, zone.getFloat("threshold"));
+      bt.hysteresis = max(1.01f, zone.getFloat("hysteresis"));
+      bt.cooldownMs = max(1, zone.getInt("cooldownMs"));
+      bt.attack = constrain(zone.getFloat("attack"), 0.001f, 1);
+      bt.release = constrain(zone.getFloat("release"), 0.001f, 1);
+      bt.midiNote = clamp127(zone.getInt("midiNote"));
+      MIDI_CCS[min(i, MIDI_CCS.length-1)] = clamp127(zone.getInt("cc"));
+      setZoneBounds(bt, zone.getFloat("loHz"), zone.getFloat("hiHz"));
+    }
+    FLEXIBLE_ZONE_MODE = true;
+    println("Loaded flexible zones from " + path + "; calibration must re-arm after a release.");
+  } catch (Exception e) {
+    println("Load zones error: " + e);
+  }
+}
+
 // ---------- MIDI Learn Burst ----------
 
 void midiHello() {
@@ -871,6 +1016,16 @@ void keyPressed() {
   if (key == ',') bt.cooldownMs = max(10, int(bt.cooldownMs * 0.9f));
   if (key == '.') bt.cooldownMs = int(bt.cooldownMs * 1.1f);
 
+  // Flexible-zone precision controls: move in musical ratios, resize in place.
+  if (FLEXIBLE_ZONE_MODE && key == 'z') bt.setCenterWidth((bt.loHz + bt.hiHz) * 0.5f / 1.0594631f, bt.hiHz - bt.loHz, nyquistHz());
+  if (FLEXIBLE_ZONE_MODE && key == 'x') bt.setCenterWidth((bt.loHz + bt.hiHz) * 0.5f * 1.0594631f, bt.hiHz - bt.loHz, nyquistHz());
+  if (FLEXIBLE_ZONE_MODE && key == 'v') bt.setCenterWidth((bt.loHz + bt.hiHz) * 0.5f, (bt.hiHz - bt.loHz) / 1.122462f, nyquistHz());
+  if (FLEXIBLE_ZONE_MODE && key == 'n') bt.setCenterWidth((bt.loHz + bt.hiHz) * 0.5f, (bt.hiHz - bt.loHz) * 1.122462f, nyquistHz());
+  if (FLEXIBLE_ZONE_MODE && key == 'a') bt.attack = max(0.01f, bt.attack - 0.02f);
+  if (FLEXIBLE_ZONE_MODE && key == 'A') bt.attack = min(1, bt.attack + 0.02f);
+  if (FLEXIBLE_ZONE_MODE && key == 'w') bt.release = max(0.01f, bt.release - 0.02f);
+  if (FLEXIBLE_ZONE_MODE && key == 'W') bt.release = min(1, bt.release + 0.02f);
+
   if (key == '-') {
     if (RIG_TUNED_MODE) println("Rig-tuned mode: note remap is disabled.");
     else { bt.midiNote = clamp127(bt.midiNote - 1); println("Band " + (selectedBand+1) + " note -> " + bt.midiNote + " (" + noteName(bt.midiNote) + ")"); }
@@ -930,8 +1085,46 @@ void keyPressed() {
   if (key == 'o' || key == 'O') { loadMapping(GENERIC_MAPPING_FILE); }
   if (key == 'h' || key == 'H') { SHOW_HELP = !SHOW_HELP; }
   if (key == 'k' || key == 'K') { startCalibration(); }
+  if (key == 'f' || key == 'F') {
+    if (RIG_TUNED_MODE) println("Rig-tuned mode is always canonical legacy analysis.");
+    else { FLEXIBLE_ZONE_MODE = !FLEXIBLE_ZONE_MODE; if (FLEXIBLE_ZONE_MODE) LOG_SPECTRUM = true; println("Analysis mode -> " + (FLEXIBLE_ZONE_MODE ? "flexible mean" : "legacy summed")); }
+  }
+  if (key == 'y' || key == 'Y') { saveZoneState(ZONE_STATE_FILE); }
+  if (key == 'u' || key == 'U') { loadZoneState(ZONE_STATE_FILE); }
+  if (key == 'q' || key == 'Q') { LOG_SPECTRUM = !LOG_SPECTRUM; }
 
   updateWindowTitle();
+}
+
+void mousePressed() {
+  if (!FLEXIBLE_ZONE_MODE || RIG_TUNED_MODE || mouseY > height/2) return;
+  float hz = xToHz(mouseX);
+  float closest = Float.MAX_VALUE;
+  for (int i = 0; i < bands.length; i++) {
+    BandTrigger candidate = bands[i];
+    float distance = hz < candidate.loHz ? candidate.loHz - hz : (hz > candidate.hiHz ? hz - candidate.hiHz : 0);
+    if (distance < closest) { closest = distance; selectedBand = i; }
+  }
+  BandTrigger bt = bands[selectedBand];
+  float edgeHz = max(fft.indexToFreq(1), (displayMaxHz() - displayMinHz()) / width * 10);
+  zoneDragEdge = abs(hz - bt.loHz) < edgeHz ? -1 : (abs(hz - bt.hiHz) < edgeHz ? 1 : 0);
+}
+
+void mouseDragged() {
+  if (!FLEXIBLE_ZONE_MODE || RIG_TUNED_MODE || mouseY > height/2) return;
+  BandTrigger bt = bands[selectedBand];
+  float hz = xToHz(mouseX);
+  if (zoneDragEdge < 0) setZoneBounds(bt, hz, bt.hiHz);
+  else if (zoneDragEdge > 0) setZoneBounds(bt, bt.loHz, hz);
+  else bt.setCenterWidth(hz, bt.hiHz - bt.loHz, nyquistHz());
+}
+
+void mouseWheel(MouseEvent event) {
+  if (!LOG_SPECTRUM || fft == null) return;
+  float center = sqrt(displayMinHz() * displayMaxHz());
+  float ratio = event.getCount() > 0 ? 1.25f : 0.8f;
+  DISPLAY_MIN_HZ = max(fft.indexToFreq(1), center / sqrt((displayMaxHz() / displayMinHz()) * ratio));
+  DISPLAY_MAX_HZ = min(nyquistHz(), center * sqrt((displayMaxHz() / displayMinHz()) * ratio));
 }
 
 void switchSource() {
@@ -945,6 +1138,7 @@ void switchSource() {
     if (player != null) player.loop();
     fft = new FFT(player.bufferSize(), player.sampleRate());
   }
+  clampZonesToNyquist();
 }
 
 void focusLost() {
@@ -963,6 +1157,7 @@ void stop() {
 
 void configureRuntimeMode() {
   runtimeModeLabel = RIG_TUNED_MODE ? "RIG" : "GENERIC";
+  if (RIG_TUNED_MODE) FLEXIBLE_ZONE_MODE = false;
   rigSemanticBands = new SemanticBandBinding[0];
   if (!RIG_TUNED_MODE) return;
 
@@ -1048,8 +1243,9 @@ void sendSemanticTrigger(BandTrigger bt) {
 }
 
 String bandStatusLabel(BandTrigger bt, int rawIndex) {
+  String calibration = bt.calibrationInvalidated ? " CAL?" : "";
   if (!RIG_TUNED_MODE) {
-    return String.format("T%.1f H%.2f C%dms N%d(%s) CC%d", bt.threshold, bt.hysteresis, bt.cooldownMs, bt.midiNote, noteName(bt.midiNote), MIDI_CCS[min(rawIndex, MIDI_CCS.length-1)]);
+    return String.format("T%.3f H%.2f C%dms N%d(%s) CC%d%s", bt.threshold, bt.hysteresis, bt.cooldownMs, bt.midiNote, noteName(bt.midiNote), MIDI_CCS[min(rawIndex, MIDI_CCS.length-1)], calibration);
   }
   SemanticBandBinding binding = rigBindingForBand(rawIndex);
   if (binding == null) {
