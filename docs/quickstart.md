@@ -11,7 +11,7 @@
 - **Generic classroom mode**: leave `RIG_TUNED_MODE = false`. This keeps per-band note/CC editing, burst learn, and `mapping.json` save/load enabled.
 - **Rig-tuned mode**: set `RIG_TUNED_MODE = true`. The sketch then loads `interop/frzone.rig.json`, pins the canonical analysis lane, and disables classroom remap shortcuts that would drift the sibling contract.
 
-If you want the blow-by-blow of what happens each frame (source selection → FFT → band energy → smoothing → hysteresis/cooldown → OSC/MIDI sends), read **[Per-frame signal flow](architecture.md)**. It’s the punk‑rock notebook version of the `draw()` loop with search-friendly identifiers.
+If you want the blow-by-blow of what happens each frame (source selection → FFT → band energy → smoothing → hysteresis/cooldown → OSC/MIDI sends), read **[Per-frame signal flow](architecture.md)**. For independently positionable zones, use **[Flexible zones](adaptive-frequency-zones.md)**; it also separates automated evidence from required physical checks.
 
 ### Visual workflows
 - **Signal Culture** (Interstream / Re:Trace / Maelstrom): use the per‑band CCs (20–24 by default). Press **G** to send a short MIDI hello when you need to confirm a blind receiver is alive; press **B** for a learn burst in generic mode.

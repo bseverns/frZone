@@ -10,13 +10,14 @@
 - `fft.forward(src.mix);` runs once per frame using the currently selected source. Buffer length and sample rate are whatever Minim provided for the active input.
 - Band edges are set by `BAND_BOUNDS`; `fft.freqToIndex()` turns those into bin indices per band right before energy accumulation.
 
-## 3) Sum energy per band
-- For each `BandTrigger` (`bands[b]`), `iLo/iHi` wrap the FFT bin range and a simple loop accumulates `sum += fft.getBand(i);`.
-- That `sum` is the raw energy used for both continuous output and trigger checks. The sketch also tracks `maxBar` for drawing the UI bars.
+## 3) Measure energy per listener
+- In **legacy** mode, each `BandTrigger` uses the original inclusive raw sum `sum += fft.getBand(i)` across `BAND_BOUNDS`-derived defaults, preserving existing threshold behavior.
+- In **flexible generic** mode, each listener has its own `ZoneMath.Zone` bounds and uses the mean bin magnitude `Σ m[i] / N`; overlaps and gaps are valid. `ZoneMath.binSpan()` clamps to the active Nyquist limit and gives adjacent boundaries consistent ownership.
+- Bounds edits clear smoothing and disarm until a release observation, so moving a zone cannot immediately produce a repeat trigger. `zones.json` is versioned and separate from the legacy notes/CC `mapping.json`.
 
 ## 4) Normalize + smooth continuous energy
-- Continuous values are normalized against the per-band threshold: `map(sum, bt.threshold, bt.threshold*4, 0, 1)` then clamped to `0..1`.
-- `bt.smooth = lerp(bt.smooth, eN, ENERGY_SMOOTH);` applies a one-pole lowpass so visuals chill out. `ENERGY_SMOOTH` is the single classroom slider for “how twitchy are my CCs/OSC energy streams?”
+- Continuous values are normalized against the per-band threshold: `map(energy, bt.threshold, bt.threshold*4, 0, 1)` then clamped to `0..1`.
+- `bt.smooth` uses asymmetric `bt.attack` / `bt.release` smoothing. Legacy defaults match the original global settings; flexible zones can tune them independently.
 
 ## 5) Stream OSC/MIDI energy (always-on lanes)
 - When OSC is on and `SEND_OSC_ENERGY` is true, each band fires `/bandEnergy` with `(idx, fLo, fHi, smooth)`.
