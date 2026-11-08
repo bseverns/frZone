@@ -288,8 +288,8 @@ void draw() {
     if (OSC_ENABLED && SEND_OSC_ENERGY && outputsActive) {
       OscMessage em = new OscMessage(OSC_ENERGY_ADDR);
       em.add(bt.idx);
-      em.add(bt.fLo);
-      em.add(bt.fHi);
+      em.add(bt.loHz);
+      em.add(bt.hiHz);
       em.add(bt.smooth);
       osc.send(em, oscDest);
       if (RIG_TUNED_MODE) sendSemanticEnergy(bt);
@@ -478,7 +478,7 @@ void drawBandBars(float[] energies, float maxBar) {
     // labels
     fill(220);
     textAlign(CENTER, TOP);
-    text(nf(bt.fLo, 0, 0) + "-" + nf(bt.fHi, 0, 0) + " Hz", x + bw/2, h0 + hAvail + 4);
+    text(nf(bt.loHz, 0, 0) + "-" + nf(bt.hiHz, 0, 0) + " Hz", x + bw/2, h0 + hAvail + 4);
 
     textAlign(CENTER, BOTTOM);
     String s = bandStatusLabel(bt, b);
@@ -587,7 +587,7 @@ void logTriggerEvent(BandTrigger bt, float energyNorm) {
   String mode = USE_LIVE ? "LIVE" : "FILE";
   String line = String.format("%d,%s,%s,%d,%.2f,%.2f,%.6f,%.3f,%.3f,%d",
                               millis(), EVENT_LOG_CONDITION, mode, bt.idx,
-                              bt.fLo, bt.fHi, energyNorm, bt.threshold, bt.hysteresis, bt.cooldownMs);
+                              bt.loHz, bt.hiHz, energyNorm, bt.threshold, bt.hysteresis, bt.cooldownMs);
   eventLogWriter.println(line);
   eventLogWriter.flush();
 }
@@ -613,8 +613,8 @@ void closeEventLog() {
 void sendOscTrigger(BandTrigger bt, float energy) {
   OscMessage m = new OscMessage("/bandTrigger");
   m.add(bt.idx);
-  m.add(bt.fLo);
-  m.add(bt.fHi);
+  m.add(bt.loHz);
+  m.add(bt.hiHz);
   m.add(energy);
   m.add(bt.threshold);
   m.add(bt.hysteresis);
