@@ -1,6 +1,6 @@
 # Adaptive frequency zones: design and compatibility boundary
 
-**Baseline:** `e491fd873d63cb92cb896c6d46778ed23222bc5d` (`main`, captured 2026-11-06).  `python3 tools/validate_rig_alignment.py` passed before this work. The installed legacy `processing-java` cannot start on this host because its Java executable reports `Bad CPU type in executable`; this is an environment limitation, not a sketch result.
+**Baseline:** `e491fd873d63cb92cb896c6d46778ed23222bc5d` (`main`, captured 2026-11-06). `python3 tools/validate_rig_alignment.py` passed before this work. The earlier legacy Processing CLI could not start on this host; after the Apple Silicon update, Processing 4.5.7 successfully compiled this sketch. This establishes source compilation, not live audio/MIDI behavior.
 
 ## Observed baseline coupling
 
@@ -41,4 +41,4 @@ The main added per-frame work is a bounded scan of each zone’s already-compute
 
 ## Testable gates
 
-A standalone Java test exercises boundary conversion, overlap/gap independence, normalized measurement, invalid input clamping, and edit-state reset without Processing libraries. Repository validation continues to prove the committed rig profile. Runtime audio/MIDI behavior, source switching in Minim, rendering, and physical control are listed in the physical verification checklist because this host cannot run the installed Processing Java runtime.
+A standalone Java test exercises boundary conversion, overlap/gap independence, normalized measurement, invalid input clamping, and edit-state reset without Processing libraries. Repository validation continues to prove the committed rig profile, and Processing 4.5.7 compiles the full sketch on this host. Runtime audio/MIDI behavior, source switching in Minim, rendering, and physical control remain in the physical verification checklist because compilation does not exercise them.

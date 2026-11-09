@@ -35,4 +35,4 @@ Run each test in both generic legacy and flexible modes, logging with **e/r** wh
 
 ## Known limitations
 
-The current Minim FFT/window settings are unchanged. Leakage, window shape, and resolution affect narrow-zone readings; there is no weighting, retuning, or sub-bin interpolation. Automated verification covers deterministic zone math and rig profile data; this machine’s installed Processing application is x86-only and cannot launch on the arm64 host, so GUI/audio/MIDI tests remain physical verification work.
+The current Minim FFT/window settings are unchanged. Leakage, window shape, and resolution affect narrow-zone readings; there is no weighting, retuning, or sub-bin interpolation. Automated verification covers deterministic zone math and rig profile data, and Processing 4.5.7 compiles the sketch on this Apple Silicon host. GUI/audio/MIDI tests remain physical verification work because a compile does not exercise live devices or sound.
